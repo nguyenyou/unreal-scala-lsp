@@ -1,0 +1,6 @@
+out/
+.metals/
+.bsp/
+.idea/
+*.class
+*.jar
