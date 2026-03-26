@@ -44,7 +44,7 @@ trait MiniClient:
 
 object Main:
   def main(args: Array[String]): Unit =
-    System.err.println("[mini-scala-lsp] Starting server v0.4.0")
+    System.err.println("[mini-scala-lsp] Starting server v0.5.0")
     val server = MiniScalaServer()
     val launcher = new Launcher.Builder[MiniClient]()
       .setLocalService(server)

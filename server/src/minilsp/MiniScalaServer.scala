@@ -27,6 +27,8 @@ class MiniScalaServer extends MiniServer:
 
     log(s"initialize: ${folders.size} workspace folders")
 
+    val startTime = System.nanoTime()
+
     for folder <- folders do
       val uri = folder.getUri
       val path = java.net.URI(uri).getPath
@@ -41,7 +43,8 @@ class MiniScalaServer extends MiniServer:
         log(s"  indexing rootUri: $path")
         indexer.indexDirectory(java.io.File(path))
 
-    log(s"  indexed ${indexer.symbolCount} symbols in ${indexer.fileCount} files")
+    val elapsed = (System.nanoTime() - startTime) / 1_000_000
+    log(s"  indexed ${indexer.symbolCount} symbols in ${indexer.fileCount} files in ${elapsed}ms")
     CompletableFuture.completedFuture(InitializeResult(capabilities))
 
   override def initialized(params: InitializedParams): Unit =

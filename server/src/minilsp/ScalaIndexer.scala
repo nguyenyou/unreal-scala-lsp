@@ -5,6 +5,7 @@ import org.eclipse.lsp4j.Location
 import org.eclipse.lsp4j.Position as LspPosition
 import org.eclipse.lsp4j.Range as LspRange
 import scala.collection.mutable
+import java.util.concurrent.{Callable, Executors}
 
 /** Simple Scala indexer using Scalameta.
   * Indexes top-level definitions (class, trait, object, def, val, type, enum)
@@ -25,18 +26,85 @@ class ScalaIndexer:
 
   private val skipDirs = Set("out", ".git", ".metals", ".bsp", ".idea", "node_modules", "target")
 
-  def indexDirectory(dir: java.io.File): Unit =
-    if dir.isDirectory then
-      val files = dir.listFiles()
-      if files != null then files.foreach: f =>
-        if f.isDirectory && !skipDirs.contains(f.getName) then indexDirectory(f)
-        else if f.getName.endsWith(".scala") then
-          val uri = f.toURI.toString
-          val text = java.nio.file.Files.readString(f.toPath)
-          updateFile(uri, text)
+  /** Result of parsing a single file — pure, no shared state. */
+  private case class FileResult(
+    uri: String,
+    text: String,
+    symbols: List[(String, SymbolLocation)]
+  )
 
+  /** Collect all .scala files under a directory, skipping build artifacts. */
+  private def collectFiles(dir: java.io.File): List[java.io.File] =
+    if !dir.isDirectory then return Nil
+    val files = dir.listFiles()
+    if files == null then return Nil
+    files.toList.flatMap: f =>
+      if f.isDirectory && !skipDirs.contains(f.getName) then collectFiles(f)
+      else if f.isFile && f.getName.endsWith(".scala") then List(f)
+      else Nil
+
+  /** Parse a single file into an immutable result. Thread-safe — no shared state. */
+  private def parseFile(file: java.io.File): FileResult =
+    val uri = file.toURI.toString
+    val text = java.nio.file.Files.readString(file.toPath)
+    val symbols = List.newBuilder[(String, SymbolLocation)]
+
+    try
+      implicit val dialect: Dialect = dialects.Scala3
+      val input = Input.VirtualFile(uri, text)
+      val tree = input.parse[Source].get
+
+      def addSymbol(name: String, pos: scala.meta.Position): Unit =
+        symbols += ((name, SymbolLocation(uri, pos.startLine, pos.startColumn, pos.endLine, pos.endColumn)))
+
+      def traverse(tree: Tree): Unit = tree match
+        case d: Defn.Class  => addSymbol(d.name.value, d.name.pos); d.children.foreach(traverse)
+        case d: Defn.Trait  => addSymbol(d.name.value, d.name.pos); d.children.foreach(traverse)
+        case d: Defn.Object => addSymbol(d.name.value, d.name.pos); d.children.foreach(traverse)
+        case d: Defn.Def    => addSymbol(d.name.value, d.name.pos); d.children.foreach(traverse)
+        case d: Defn.Val    =>
+          d.pats.foreach:
+            case Pat.Var(name) => addSymbol(name.value, name.pos)
+            case _             =>
+          d.children.foreach(traverse)
+        case d: Defn.Type   => addSymbol(d.name.value, d.name.pos); d.children.foreach(traverse)
+        case d: Defn.Enum   => addSymbol(d.name.value, d.name.pos); d.children.foreach(traverse)
+        case d: Defn.Given if d.name.value.nonEmpty =>
+          addSymbol(d.name.value, d.name.pos); d.children.foreach(traverse)
+        case d: Pkg.Object  => addSymbol(d.name.value, d.name.pos); d.children.foreach(traverse)
+        case other           => other.children.foreach(traverse)
+
+      traverse(tree)
+    catch
+      case _: Exception => // skip files that fail to parse
+
+    FileResult(uri, text, symbols.result())
+
+  /** Merge a FileResult into the mutable index. Single-threaded. */
+  private def mergeResult(result: FileResult): Unit =
+    fileContents(result.uri) = result.text
+    val names = mutable.Set.empty[String]
+    for (name, loc) <- result.symbols do
+      definitions.getOrElseUpdate(name, mutable.ListBuffer.empty) += loc
+      names += name
+    fileSymbols(result.uri) = names.toSet
+
+  /** Index all .scala files under a directory using virtual threads. */
+  def indexDirectory(dir: java.io.File): Unit =
+    val files = collectFiles(dir)
+    if files.isEmpty then return
+
+    val executor = Executors.newVirtualThreadPerTaskExecutor()
+    try
+      val futures = files.map: f =>
+        executor.submit(new Callable[FileResult] { def call() = parseFile(f) })
+      for future <- futures do
+        mergeResult(future.get())
+    finally
+      executor.shutdown()
+
+  /** Index/re-index a single file (used by didOpen/didChange). */
   def updateFile(uri: String, text: String): Unit =
-    // Remove old symbols from this file
     removeFile(uri)
     fileContents(uri) = text
 
