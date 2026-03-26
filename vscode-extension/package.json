@@ -3,7 +3,7 @@
   "displayName": "Unreal Scala LSP",
   "description": "Source-only Scala language server",
   "version": "0.1.0",
-  "publisher": "tunguyen",
+  "publisher": "nguyenyou",
   "engines": {
     "vscode": "^1.110.0"
   },
