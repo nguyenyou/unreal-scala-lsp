@@ -16,10 +16,10 @@
     "configuration": {
       "title": "Mini Scala LSP",
       "properties": {
-        "miniScalaLsp.serverJar": {
+        "miniScalaLsp.serverPath": {
           "type": "string",
           "default": "",
-          "description": "Path to the mini-scala-lsp server assembly jar"
+          "description": "Path to the mini-scala-lsp native binary or assembly jar"
         }
       }
     }

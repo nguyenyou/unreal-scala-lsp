@@ -1,4 +1,3 @@
-import * as path from "path";
 import * as vscode from "vscode";
 import {
   LanguageClient,
@@ -10,19 +9,18 @@ let client: LanguageClient | undefined;
 
 export function activate(context: vscode.ExtensionContext) {
   const config = vscode.workspace.getConfiguration("miniScalaLsp");
-  const jarPath = config.get<string>("serverJar", "");
+  const serverPath = config.get<string>("serverPath", "");
 
-  if (!jarPath) {
+  if (!serverPath) {
     vscode.window.showErrorMessage(
-      "mini-scala-lsp: Set 'miniScalaLsp.serverJar' to the path of the server assembly jar."
+      "mini-scala-lsp: Set 'miniScalaLsp.serverPath' to the native binary or assembly jar path."
     );
     return;
   }
 
-  const serverOptions: ServerOptions = {
-    command: "java",
-    args: ["-jar", jarPath],
-  };
+  const serverOptions: ServerOptions = serverPath.endsWith(".jar")
+    ? { command: "java", args: ["-jar", serverPath] }
+    : { command: serverPath };
 
   const clientOptions: LanguageClientOptions = {
     documentSelector: [{ scheme: "file", language: "scala" }],

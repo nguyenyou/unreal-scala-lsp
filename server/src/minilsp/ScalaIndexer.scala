@@ -1,9 +1,6 @@
 package minilsp
 
 import scala.meta.*
-import org.eclipse.lsp4j.Location
-import org.eclipse.lsp4j.Position as LspPosition
-import org.eclipse.lsp4j.Range as LspRange
 import scala.collection.mutable
 import java.util.concurrent.{Callable, Executors}
 
@@ -151,18 +148,9 @@ class ScalaIndexer:
           if locs.isEmpty then definitions.remove(name)
     fileContents.remove(uri)
 
-  def findDefinition(uri: String, line: Int, col: Int): List[Location] =
-    val word = wordAtPosition(uri, line, col)
-    word match
-      case Some(w) =>
-        definitions.get(w) match
-          case Some(locs) =>
-            locs.toList.map: loc =>
-              Location(
-                loc.uri,
-                LspRange(LspPosition(loc.line, loc.col), LspPosition(loc.endLine, loc.endCol))
-              )
-          case None => Nil
+  def findDefinition(uri: String, line: Int, col: Int): List[SymbolLocation] =
+    wordAtPosition(uri, line, col) match
+      case Some(w) => definitions.get(w).map(_.toList).getOrElse(Nil)
       case None => Nil
 
   def wordAtPosition(uri: String, line: Int, col: Int): Option[String] =
