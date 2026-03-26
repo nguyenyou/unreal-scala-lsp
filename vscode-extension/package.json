@@ -35,10 +35,12 @@
     "@types/node": "25.5.0",
     "@types/vscode": "1.110.0",
     "@vscode/vsce": "3.7.1",
+    "esbuild": "0.27.4",
     "typescript": "6.0.2"
   },
   "scripts": {
-    "compile": "tsc -p .",
+    "compile": "esbuild src/extension.ts --bundle --outfile=out/extension.js --external:vscode --format=cjs --platform=node",
+    "check": "tsc -p . --noEmit",
     "package": "vsce package"
   }
 }
