@@ -1,0 +1,86 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-15
+            artifact: unreal-scala-lsp-darwin-arm64
+          - os: macos-15-intel
+            artifact: unreal-scala-lsp-darwin-x64
+          - os: ubuntu-24.04
+            artifact: unreal-scala-lsp-linux-x64
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: graalvm/setup-graalvm@v1
+        with:
+          java-version: '25'
+          distribution: 'graalvm-community'
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build native image
+        run: |
+          ./mill server.nativeImage
+          cp out/server/nativeImage.dest/native-executable ${{ matrix.artifact }}
+
+      - name: Test binary
+        run: |
+          echo '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"processId":1,"rootUri":"file:///tmp","capabilities":{}}}' > /tmp/init.json
+          CONTENT=$(cat /tmp/init.json)
+          LEN=${#CONTENT}
+          (printf "Content-Length: %d\r\n\r\n%s" "$LEN" "$CONTENT"; sleep 1) | timeout 3 ./${{ matrix.artifact }} 2>&1 || true
+
+      - name: Generate checksum
+        run: shasum -a 256 ${{ matrix.artifact }} > ${{ matrix.artifact }}.sha256
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: |
+            ${{ matrix.artifact }}
+            ${{ matrix.artifact }}.sha256
+
+  release:
+    needs: build
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Make binaries executable
+        run: chmod +x artifacts/*/unreal-scala-lsp-*
+
+      - name: Generate combined checksums
+        run: |
+          cd artifacts
+          shasum -a 256 */unreal-scala-lsp-darwin-arm64 */unreal-scala-lsp-darwin-x64 */unreal-scala-lsp-linux-x64 | sed 's|[^/]*/||' > ../checksums.txt
+          cd ..
+          cat checksums.txt
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            artifacts/*/unreal-scala-lsp-*
+            checksums.txt
+          generate_release_notes: true
