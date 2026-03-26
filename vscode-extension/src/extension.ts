@@ -76,18 +76,10 @@ async function ensureBinary(
 
   const url = `https://github.com/${REPO}/releases/download/v${VERSION}/${artifact}`;
 
-  const shouldDownload = await vscode.window.showInformationMessage(
-    `Unreal Scala LSP v${VERSION} is not installed. Download it now?`,
-    "Download",
-    "Cancel"
-  );
-
-  if (shouldDownload !== "Download") return undefined;
-
   return vscode.window.withProgress(
     {
       location: vscode.ProgressLocation.Notification,
-      title: "Downloading Unreal Scala LSP...",
+      title: `Downloading Unreal Scala LSP v${VERSION}...`,
     },
     async () => {
       try {
