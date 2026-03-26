@@ -4,6 +4,9 @@
   "description": "Source-only Scala language server",
   "version": "0.1.0",
   "publisher": "nguyenyou",
+  "repository": {
+    "url": "https://github.com/nguyenyou/unreal-scala-lsp"
+  },
   "engines": {
     "vscode": "^1.110.0"
   },
