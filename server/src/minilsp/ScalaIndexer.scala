@@ -1,19 +1,17 @@
 package minilsp
 
 import scala.meta.*
+import scala.meta.tokens.Token
 import scala.collection.mutable
 import java.util.concurrent.{Callable, Executors}
 
-/** Simple Scala indexer using Scalameta.
-  * Indexes top-level definitions (class, trait, object, def, val, type, enum)
-  * and resolves go-to-definition by matching the word under cursor.
+/** Two-tier Scala indexer.
+  * Tier 1 (scanFile): Token-only scan for batch indexing — no AST, fast.
+  * Tier 2 (updateFile): Full Scalameta parse for open files — accurate positions.
   */
 class ScalaIndexer:
-  // symbol name -> list of (uri, line, col, endLine, endCol)
   private val definitions = mutable.Map.empty[String, mutable.ListBuffer[SymbolLocation]]
-  // uri -> set of symbol names defined in that file
   private val fileSymbols = mutable.Map.empty[String, Set[String]]
-  // uri -> source text (for word-under-cursor extraction)
   private val fileContents = mutable.Map.empty[String, String]
 
   case class SymbolLocation(uri: String, line: Int, col: Int, endLine: Int, endCol: Int)
@@ -23,14 +21,12 @@ class ScalaIndexer:
 
   private val skipDirs = Set("out", ".git", ".metals", ".bsp", ".idea", "node_modules", "target")
 
-  /** Result of parsing a single file — pure, no shared state. */
   private case class FileResult(
     uri: String,
     text: String,
     symbols: List[(String, SymbolLocation)]
   )
 
-  /** Collect all .scala files under a directory, skipping build artifacts. */
   private def collectFiles(dir: java.io.File): List[java.io.File] =
     if !dir.isDirectory then return Nil
     val files = dir.listFiles()
@@ -40,8 +36,22 @@ class ScalaIndexer:
       else if f.isFile && f.getName.endsWith(".scala") then List(f)
       else Nil
 
-  /** Parse a single file into an immutable result. Thread-safe — no shared state. */
-  private def parseFile(file: java.io.File): FileResult =
+  // --- Tier 1: Token-only scan (batch indexing) ---
+
+  /** Definition-introducing keywords. */
+  private def isDefKeyword(tok: Token): Boolean = tok match
+    case _: Token.KwClass  => true
+    case _: Token.KwTrait  => true
+    case _: Token.KwObject => true
+    case _: Token.KwEnum   => true
+    case _: Token.KwDef    => true
+    case _: Token.KwVal    => true
+    case _: Token.KwType   => true
+    case _: Token.KwGiven  => true
+    case _                 => false
+
+  /** Scan a file using tokenizer only — no AST. Thread-safe. */
+  private def scanFile(file: java.io.File): FileResult =
     val uri = file.toURI.toString
     val text = java.nio.file.Files.readString(file.toPath)
     val symbols = List.newBuilder[(String, SymbolLocation)]
@@ -49,35 +59,34 @@ class ScalaIndexer:
     try
       implicit val dialect: Dialect = dialects.Scala3
       val input = Input.VirtualFile(uri, text)
-      val tree = input.parse[Source].get
+      val tokens = input.tokenize.get.tokens
+      var depth = 0 // brace depth
+      var i = 0
 
-      def addSymbol(name: String, pos: scala.meta.Position): Unit =
-        symbols += ((name, SymbolLocation(uri, pos.startLine, pos.startColumn, pos.endLine, pos.endColumn)))
-
-      def traverse(tree: Tree): Unit = tree match
-        case d: Defn.Class  => addSymbol(d.name.value, d.name.pos); d.children.foreach(traverse)
-        case d: Defn.Trait  => addSymbol(d.name.value, d.name.pos); d.children.foreach(traverse)
-        case d: Defn.Object => addSymbol(d.name.value, d.name.pos); d.children.foreach(traverse)
-        case d: Defn.Def    => addSymbol(d.name.value, d.name.pos); d.children.foreach(traverse)
-        case d: Defn.Val    =>
-          d.pats.foreach:
-            case Pat.Var(name) => addSymbol(name.value, name.pos)
-            case _             =>
-          d.children.foreach(traverse)
-        case d: Defn.Type   => addSymbol(d.name.value, d.name.pos); d.children.foreach(traverse)
-        case d: Defn.Enum   => addSymbol(d.name.value, d.name.pos); d.children.foreach(traverse)
-        case d: Defn.Given if d.name.value.nonEmpty =>
-          addSymbol(d.name.value, d.name.pos); d.children.foreach(traverse)
-        case d: Pkg.Object  => addSymbol(d.name.value, d.name.pos); d.children.foreach(traverse)
-        case other           => other.children.foreach(traverse)
-
-      traverse(tree)
+      while i < tokens.length do
+        val tok = tokens(i)
+        tok match
+          case _: Token.LeftBrace  => depth += 1
+          case _: Token.RightBrace => depth = math.max(0, depth - 1)
+          case _ if isDefKeyword(tok) && depth <= 1 =>
+            // Find the next Ident token (skip whitespace, comments, modifiers)
+            var j = i + 1
+            while j < tokens.length && !tokens(j).isInstanceOf[Token.Ident] do
+              tokens(j) match
+                case _: Token.LeftBrace | _: Token.LeftParen | _: Token.Semicolon | _: Token.EOF =>
+                  j = tokens.length // bail — no ident follows
+                case _ => j += 1
+            if j < tokens.length then
+              val ident = tokens(j).asInstanceOf[Token.Ident]
+              val pos = ident.pos
+              symbols += ((ident.value, SymbolLocation(uri, pos.startLine, pos.startColumn, pos.endLine, pos.endColumn)))
+          case _ => ()
+        i += 1
     catch
-      case _: Exception => // skip files that fail to parse
+      case _: Exception => // skip files that fail to tokenize
 
     FileResult(uri, text, symbols.result())
 
-  /** Merge a FileResult into the mutable index. Single-threaded. */
   private def mergeResult(result: FileResult): Unit =
     fileContents(result.uri) = result.text
     val names = mutable.Set.empty[String]
@@ -86,7 +95,7 @@ class ScalaIndexer:
       names += name
     fileSymbols(result.uri) = names.toSet
 
-  /** Index all .scala files under a directory using virtual threads. */
+  /** Index all .scala files under a directory using token scan + virtual threads. */
   def indexDirectory(dir: java.io.File): Unit =
     val files = collectFiles(dir)
     if files.isEmpty then return
@@ -94,13 +103,14 @@ class ScalaIndexer:
     val executor = Executors.newVirtualThreadPerTaskExecutor()
     try
       val futures = files.map: f =>
-        executor.submit(new Callable[FileResult] { def call() = parseFile(f) })
+        executor.submit(new Callable[FileResult] { def call() = scanFile(f) })
       for future <- futures do
         mergeResult(future.get())
     finally
       executor.shutdown()
 
-  /** Index/re-index a single file (used by didOpen/didChange). */
+  // --- Tier 2: Full parse (single file, didOpen/didChange) ---
+
   def updateFile(uri: String, text: String): Unit =
     removeFile(uri)
     fileContents(uri) = text
@@ -139,6 +149,8 @@ class ScalaIndexer:
       case _: Exception => // skip files that fail to parse
 
     fileSymbols(uri) = symbolNames.toSet
+
+  // --- Shared ---
 
   def removeFile(uri: String): Unit =
     fileSymbols.remove(uri).foreach: names =>
