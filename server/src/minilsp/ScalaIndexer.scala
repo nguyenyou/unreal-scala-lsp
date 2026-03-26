@@ -165,6 +165,39 @@ class ScalaIndexer:
       case Some(w) => definitions.get(w).map(_.toList).getOrElse(Nil)
       case None => Nil
 
+  /** Find all occurrences of a word across all indexed files. */
+  def findReferences(uri: String, line: Int, col: Int, includeDeclaration: Boolean): List[SymbolLocation] =
+    wordAtPosition(uri, line, col) match
+      case None => Nil
+      case Some(word) =>
+        val results = mutable.ListBuffer.empty[SymbolLocation]
+
+        // Search every indexed file's text for word-boundary matches
+        for (fileUri, text) <- fileContents do
+          val lines = text.split("\n", -1)
+          var lineNum = 0
+          while lineNum < lines.length do
+            val l = lines(lineNum)
+            var pos = 0
+            while pos < l.length do
+              val idx = l.indexOf(word, pos)
+              if idx == -1 then pos = l.length
+              else
+                // Check word boundaries
+                val before = idx == 0 || !isIdentChar(l(idx - 1))
+                val after = idx + word.length >= l.length || !isIdentChar(l(idx + word.length))
+                if before && after then
+                  results += SymbolLocation(fileUri, lineNum, idx, lineNum, idx + word.length)
+                pos = idx + 1
+            lineNum += 1
+
+        val refs = results.toList
+        if includeDeclaration then refs
+        else
+          // Exclude locations that are definitions
+          val defs = definitions.get(word).map(_.toSet).getOrElse(Set.empty)
+          refs.filterNot(defs.contains)
+
   def wordAtPosition(uri: String, line: Int, col: Int): Option[String] =
     fileContents.get(uri).flatMap: text =>
       val lines = text.split("\n", -1)

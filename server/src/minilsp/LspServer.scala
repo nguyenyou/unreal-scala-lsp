@@ -24,7 +24,8 @@ class LspServer(rpc: JsonRpc):
           case "textDocument/didChange"  => handleDidChange(params)
           case "textDocument/didClose"   => () // no-op
           case "textDocument/didSave"    => () // no-op
-          case "textDocument/definition" => id.foreach(i => handleDefinition(i, params))
+          case "textDocument/definition"  => id.foreach(i => handleDefinition(i, params))
+          case "textDocument/references" => id.foreach(i => handleReferences(i, params))
           case other                     => log(s"unhandled: $other")
       catch
         case e: RuntimeException if e.getMessage == "EOF" =>
@@ -62,6 +63,7 @@ class LspServer(rpc: JsonRpc):
       "capabilities" -> ujson.Obj(
         "textDocumentSync" -> 1, // Full
         "definitionProvider" -> true,
+        "referencesProvider" -> true,
       )
     ))
 
@@ -90,6 +92,29 @@ class LspServer(rpc: JsonRpc):
 
     val locations = indexer.findDefinition(uri, line, col)
     log(s"  found ${locations.size} locations")
+
+    val result = ujson.Arr.from(locations.map: loc =>
+      ujson.Obj(
+        "uri" -> loc.uri,
+        "range" -> ujson.Obj(
+          "start" -> ujson.Obj("line" -> loc.line, "character" -> loc.col),
+          "end" -> ujson.Obj("line" -> loc.endLine, "character" -> loc.endCol),
+        )
+      )
+    )
+    rpc.respond(id, result)
+
+  private def handleReferences(id: ujson.Value, params: ujson.Value): Unit =
+    val uri = params("textDocument")("uri").str
+    val line = params("position")("line").num.toInt
+    val col = params("position")("character").num.toInt
+    val includeDeclaration = params("context")("includeDeclaration").bool
+
+    val word = indexer.wordAtPosition(uri, line, col)
+    log(s"references: $uri:$line:$col word=$word includeDeclaration=$includeDeclaration")
+
+    val locations = indexer.findReferences(uri, line, col, includeDeclaration)
+    log(s"  found ${locations.size} references")
 
     val result = ujson.Arr.from(locations.map: loc =>
       ujson.Obj(
