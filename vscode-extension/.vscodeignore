@@ -1,0 +1,9 @@
+**/*
+!out/extension.js
+!package.json
+!LICENSE
+!node_modules/vscode-languageclient/**
+!node_modules/vscode-languageserver-protocol/**
+!node_modules/vscode-languageserver-types/**
+!node_modules/vscode-jsonrpc/**
+!node_modules/semver/**
