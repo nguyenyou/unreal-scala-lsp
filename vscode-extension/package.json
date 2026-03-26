@@ -5,6 +5,7 @@
   "version": "1.0.0",
   "publisher": "nguyenyou",
   "license": "MIT",
+  "icon": "unreal-logo.png",
   "repository": {
     "url": "https://github.com/nguyenyou/unreal-scala-lsp"
   },
