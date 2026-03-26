@@ -8,7 +8,7 @@ import {
   ServerOptions,
 } from "vscode-languageclient/node";
 
-const VERSION = "0.8.0";
+const VERSION = "1.0.0";
 const REPO = "nguyenyou/unreal-scala-lsp";
 
 let client: LanguageClient | undefined;
