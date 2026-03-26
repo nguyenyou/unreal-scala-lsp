@@ -4,6 +4,7 @@
   "description": "Source-only Scala language server",
   "version": "0.1.0",
   "publisher": "nguyenyou",
+  "license": "MIT",
   "repository": {
     "url": "https://github.com/nguyenyou/unreal-scala-lsp"
   },
