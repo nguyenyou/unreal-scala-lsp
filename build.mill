@@ -11,7 +11,7 @@ object server extends ScalaModule with NativeImageModule {
     mvn"com.lihaoyi::ujson:4.4.3",
   )
 
-  def mainClass = Some("minilsp.Main")
+  def mainClass = Some("unreallsp.Main")
 
   def jvmVersion = Task { "graalvm-community:25" }
 

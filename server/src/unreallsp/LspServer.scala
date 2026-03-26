@@ -1,4 +1,4 @@
-package minilsp
+package unreallsp
 
 import ujson.*
 

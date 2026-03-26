@@ -1,7 +1,7 @@
-package minilsp
+package unreallsp
 
 private def log(msg: String): Unit =
-  System.err.println(s"[mini-scala-lsp] $msg")
+  System.err.println(s"[unreal-scala-lsp] $msg")
 
 object Main:
   def main(args: Array[String]): Unit =

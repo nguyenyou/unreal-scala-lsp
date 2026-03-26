@@ -8,12 +8,12 @@ import {
 let client: LanguageClient | undefined;
 
 export function activate(context: vscode.ExtensionContext) {
-  const config = vscode.workspace.getConfiguration("miniScalaLsp");
+  const config = vscode.workspace.getConfiguration("unrealScalaLsp");
   const serverPath = config.get<string>("serverPath", "");
 
   if (!serverPath) {
     vscode.window.showErrorMessage(
-      "mini-scala-lsp: Set 'miniScalaLsp.serverPath' to the native binary or assembly jar path."
+      "unreal-scala-lsp: Set 'unrealScalaLsp.serverPath' to the native binary or assembly jar path."
     );
     return;
   }
@@ -27,8 +27,8 @@ export function activate(context: vscode.ExtensionContext) {
   };
 
   client = new LanguageClient(
-    "miniScalaLsp",
-    "Mini Scala LSP",
+    "unrealScalaLsp",
+    "Unreal Scala LSP",
     serverOptions,
     clientOptions
   );

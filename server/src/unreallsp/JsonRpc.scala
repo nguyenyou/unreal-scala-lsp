@@ -1,4 +1,4 @@
-package minilsp
+package unreallsp
 
 import java.io.{InputStream, OutputStream}
 import ujson.*

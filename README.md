@@ -1,6 +1,6 @@
-# mini-scala-lsp
+# unreal-scala-lsp
 
-Minimal Scala Language Server supporting **Go to Definition**.
+Source-only Scala Language Server. No compiler, no build server — just tokens and text.
 
 Uses [Scalameta](https://scalameta.org/) to parse Scala files and index top-level definitions (class, trait, object, def, val, type, enum, given).
 
@@ -29,20 +29,20 @@ cd vscode-extension
 bun install
 bun run compile
 bunx @vscode/vsce package
-code --install-extension mini-scala-lsp-0.1.0.vsix
+code --install-extension unreal-scala-lsp-0.1.0.vsix
 ```
 
 ### Configure
 
 1. Open VS Code Settings (Cmd+,)
-2. Search for `miniScalaLsp.serverPath`
+2. Search for `unrealScalaLsp.serverPath`
 3. Set it to the native binary or assembly jar path:
    ```
-   /path/to/mini-scala-lsp/out/server/nativeImage.dest/native-executable
+   /path/to/unreal-scala-lsp/out/server/nativeImage.dest/native-executable
    ```
    or:
    ```
-   /path/to/mini-scala-lsp/out/server/assembly.dest/out.jar
+   /path/to/unreal-scala-lsp/out/server/assembly.dest/out.jar
    ```
 4. Reload VS Code (Cmd+Shift+P -> "Developer: Reload Window")
 
@@ -67,7 +67,7 @@ The JSON-RPC transport is hand-rolled (~50 lines) using Content-Length framing o
 
 ## Comparison with Metals
 
-| Feature | mini-scala-lsp | Metals |
+| Feature | unreal-scala-lsp | Metals |
 |---|---|---|
 | Go to Definition (workspace) | Name-based matching | Compiler + SemanticDB + fallback chain |
 | Go to Definition (dependencies) | - | Source JARs indexed via SemanticDB |
@@ -96,7 +96,7 @@ Based on the [LSP 3.17 Specification](https://microsoft.github.io/language-serve
 | `textDocument/declaration` | - | |
 | `textDocument/typeDefinition` | - | |
 | `textDocument/implementation` | - | |
-| `textDocument/references` | - | |
+| `textDocument/references` | Supported | Text-based word-boundary search |
 | `textDocument/hover` | - | |
 | `textDocument/completion` | - | |
 | `textDocument/signatureHelp` | - | |

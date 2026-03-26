@@ -1,7 +1,7 @@
 {
-  "name": "mini-scala-lsp",
-  "displayName": "Mini Scala LSP",
-  "description": "Minimal Scala language server",
+  "name": "unreal-scala-lsp",
+  "displayName": "Unreal Scala LSP",
+  "description": "Source-only Scala language server",
   "version": "0.1.0",
   "publisher": "tunguyen",
   "engines": {
@@ -14,12 +14,12 @@
   "main": "./out/extension.js",
   "contributes": {
     "configuration": {
-      "title": "Mini Scala LSP",
+      "title": "Unreal Scala LSP",
       "properties": {
-        "miniScalaLsp.serverPath": {
+        "unrealScalaLsp.serverPath": {
           "type": "string",
           "default": "",
-          "description": "Path to the mini-scala-lsp native binary or assembly jar"
+          "description": "Path to the unreal-scala-lsp native binary or assembly jar"
         }
       }
     }
