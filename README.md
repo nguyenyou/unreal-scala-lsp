@@ -80,6 +80,8 @@ The JSON-RPC transport is hand-rolled (~50 lines) using Content-Length framing o
 
 ## LSP Feature Coverage
 
+Based on the [LSP 3.17 Specification](https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/).
+
 | LSP Feature | Status | Notes |
 |---|---|---|
 | **General** | | |
