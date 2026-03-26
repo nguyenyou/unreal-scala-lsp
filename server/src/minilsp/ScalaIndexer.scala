@@ -20,10 +20,16 @@ class ScalaIndexer:
 
   case class SymbolLocation(uri: String, line: Int, col: Int, endLine: Int, endCol: Int)
 
+  def symbolCount: Int = definitions.size
+  def fileCount: Int = fileSymbols.size
+
+  private val skipDirs = Set("out", ".git", ".metals", ".bsp", ".idea", "node_modules", "target")
+
   def indexDirectory(dir: java.io.File): Unit =
     if dir.isDirectory then
-      dir.listFiles().foreach: f =>
-        if f.isDirectory then indexDirectory(f)
+      val files = dir.listFiles()
+      if files != null then files.foreach: f =>
+        if f.isDirectory && !skipDirs.contains(f.getName) then indexDirectory(f)
         else if f.getName.endsWith(".scala") then
           val uri = f.toURI.toString
           val text = java.nio.file.Files.readString(f.toPath)
@@ -37,6 +43,7 @@ class ScalaIndexer:
     val symbolNames = mutable.Set.empty[String]
 
     try
+      implicit val dialect: Dialect = dialects.Scala3
       val input = Input.VirtualFile(uri, text)
       val tree = input.parse[Source].get
 
@@ -90,7 +97,7 @@ class ScalaIndexer:
           case None => Nil
       case None => Nil
 
-  private def wordAtPosition(uri: String, line: Int, col: Int): Option[String] =
+  def wordAtPosition(uri: String, line: Int, col: Int): Option[String] =
     fileContents.get(uri).flatMap: text =>
       val lines = text.split("\n", -1)
       if line < lines.length then

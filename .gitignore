@@ -1,6 +1,19 @@
+# Mill
 out/
+
+# IDE
 .metals/
 .bsp/
 .idea/
+.vscode/
+
+# Java/Scala
 *.class
 *.jar
+*.log
+
+# VS Code extension
+vscode-extension/node_modules/
+vscode-extension/out/
+vscode-extension/*.vsix
+vscode-extension/bun.lock

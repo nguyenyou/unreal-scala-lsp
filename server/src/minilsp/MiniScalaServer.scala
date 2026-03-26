@@ -3,15 +3,17 @@ package minilsp
 import java.util.concurrent.CompletableFuture
 import org.eclipse.lsp4j.*
 import org.eclipse.lsp4j.jsonrpc.messages
-import org.eclipse.lsp4j.services.*
 import scala.jdk.CollectionConverters.*
 
-class MiniScalaServer extends LanguageServer with TextDocumentService with WorkspaceService:
+private def log(msg: String): Unit =
+  System.err.println(s"[mini-scala-lsp] $msg")
+
+class MiniScalaServer extends MiniServer:
   import scala.compiletime.uninitialized
-  private var client: LanguageClient = uninitialized
+  private var client: MiniClient = uninitialized
   private val indexer = ScalaIndexer()
 
-  def connect(client: LanguageClient): Unit =
+  def connect(client: MiniClient): Unit =
     this.client = client
 
   override def initialize(params: InitializeParams): CompletableFuture[InitializeResult] =
@@ -19,72 +21,71 @@ class MiniScalaServer extends LanguageServer with TextDocumentService with Works
     capabilities.setTextDocumentSync(TextDocumentSyncKind.Full)
     capabilities.setDefinitionProvider(true)
 
-    // Index workspace on init
     val folders = Option(params.getWorkspaceFolders)
       .map(_.asScala.toList)
       .getOrElse(Nil)
 
+    log(s"initialize: ${folders.size} workspace folders")
+
     for folder <- folders do
       val uri = folder.getUri
       val path = java.net.URI(uri).getPath
+      log(s"  indexing folder: $path")
       indexer.indexDirectory(java.io.File(path))
 
-    // Fallback to rootUri
     if folders.isEmpty then
-      Option(params.getRootUri).foreach: uri =>
+      val rootUri = Option(params.getRootUri)
+      log(s"  no folders, rootUri=$rootUri")
+      rootUri.foreach: uri =>
         val path = java.net.URI(uri).getPath
+        log(s"  indexing rootUri: $path")
         indexer.indexDirectory(java.io.File(path))
 
+    log(s"  indexed ${indexer.symbolCount} symbols in ${indexer.fileCount} files")
     CompletableFuture.completedFuture(InitializeResult(capabilities))
 
+  override def initialized(params: InitializedParams): Unit =
+    log("initialized notification received")
+
   override def shutdown(): CompletableFuture[AnyRef] =
+    log("shutdown")
     CompletableFuture.completedFuture(null)
 
   override def exit(): Unit =
+    log("exit")
     System.exit(0)
-
-  override def getTextDocumentService: TextDocumentService = this
-
-  override def getWorkspaceService: WorkspaceService = this
-
-  // -- TextDocumentService --
 
   override def didOpen(params: DidOpenTextDocumentParams): Unit =
     val uri = params.getTextDocument.getUri
     val text = params.getTextDocument.getText
+    log(s"didOpen: $uri (${text.length} chars)")
     indexer.updateFile(uri, text)
+    log(s"  now ${indexer.symbolCount} symbols in ${indexer.fileCount} files")
 
   override def didChange(params: DidChangeTextDocumentParams): Unit =
     val uri = params.getTextDocument.getUri
     val text = params.getContentChanges.asScala.lastOption.map(_.getText).getOrElse("")
+    log(s"didChange: $uri (${text.length} chars)")
     indexer.updateFile(uri, text)
 
-  override def didClose(params: DidCloseTextDocumentParams): Unit = ()
+  override def didClose(params: DidCloseTextDocumentParams): Unit =
+    log(s"didClose: ${params.getTextDocument.getUri}")
 
-  override def didSave(params: DidSaveTextDocumentParams): Unit = ()
+  override def didSave(params: DidSaveTextDocumentParams): Unit =
+    log(s"didSave: ${params.getTextDocument.getUri}")
 
   override def definition(params: DefinitionParams): CompletableFuture[messages.Either[java.util.List[? <: Location], java.util.List[? <: LocationLink]]] =
     val uri = params.getTextDocument.getUri
     val line = params.getPosition.getLine
     val col = params.getPosition.getCharacter
 
+    val word = indexer.wordAtPosition(uri, line, col)
+    log(s"definition: $uri:$line:$col word=$word")
+
     val locations = indexer.findDefinition(uri, line, col)
+    log(s"  found ${locations.size} locations: ${locations.map(l => s"${l.getUri}:${l.getRange.getStart.getLine}")}")
+
     val result = messages.Either.forLeft[java.util.List[? <: Location], java.util.List[? <: LocationLink]](
       locations.asJava
     )
     CompletableFuture.completedFuture(result)
-
-  // -- WorkspaceService --
-
-  override def didChangeConfiguration(params: DidChangeConfigurationParams): Unit = ()
-
-  override def didChangeWatchedFiles(params: DidChangeWatchedFilesParams): Unit =
-    params.getChanges.asScala.foreach: event =>
-      val uri = event.getUri
-      if uri.endsWith(".scala") then
-        event.getType match
-          case FileChangeType.Deleted => indexer.removeFile(uri)
-          case _ =>
-            val path = java.nio.file.Paths.get(java.net.URI(uri))
-            val text = java.nio.file.Files.readString(path)
-            indexer.updateFile(uri, text)
