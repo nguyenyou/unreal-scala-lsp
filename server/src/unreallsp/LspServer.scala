@@ -17,15 +17,16 @@ class LspServer(rpc: JsonRpc):
 
         method match
           case "initialize"              => handleInitialize(id.get, params)
-          case "initialized"             => log("initialized")
+          case "initialized"             => handleInitialized()
           case "shutdown"                => id.foreach(i => rpc.respond(i, ujson.Null)); running = false
           case "exit"                    => running = false
           case "textDocument/didOpen"    => handleDidOpen(params)
           case "textDocument/didChange"  => handleDidChange(params)
-          case "textDocument/didClose"   => () // no-op
+          case "textDocument/didClose"   => handleDidClose(params)
           case "textDocument/didSave"    => () // no-op
           case "textDocument/definition"  => id.foreach(i => handleDefinition(i, params))
           case "textDocument/references" => id.foreach(i => handleReferences(i, params))
+          case "workspace/didChangeWatchedFiles" => handleDidChangeWatchedFiles(params)
           case other                     => log(s"unhandled: $other")
       catch
         case e: RuntimeException if e.getMessage == "EOF" =>
@@ -38,6 +39,16 @@ class LspServer(rpc: JsonRpc):
       .flatMap(v => if v.isNull then None else Some(v.arr.toList))
       .getOrElse(Nil)
 
+    log("unreal-scala-lsp — source-only Scala language server")
+    log("no compiler, no build server — just tokens and text")
+    log("")
+    log("features:")
+    log("  go-to-definition    name-based lookup from a two-tier index")
+    log("                      tier 1: fast token scan (batch, parallel via virtual threads)")
+    log("                      tier 2: full Scalameta AST parse (open files, accurate positions)")
+    log("  find-references     text search with word-boundary matching across all indexed files")
+    log("  file watching       auto-reindex on create/change/delete via workspace/didChangeWatchedFiles")
+    log("")
     log(s"initialize: ${folders.size} workspace folders")
 
     if folders.nonEmpty then
@@ -48,7 +59,7 @@ class LspServer(rpc: JsonRpc):
         val startTime = System.nanoTime()
         indexer.indexDirectory(java.io.File(path))
         val elapsed = (System.nanoTime() - startTime) / 1_000_000
-        log(s"indexed ${indexer.symbolCount} symbols in ${indexer.fileCount} files in ${elapsed}ms")
+        log(s"done in ${elapsed}ms — now tracking ${indexer.uniqueSymbolNames} unique symbol names, collected across ${indexer.indexedFiles} files")
     else
       params.obj.get("rootUri").foreach: v =>
         if !v.isNull then
@@ -57,7 +68,7 @@ class LspServer(rpc: JsonRpc):
           val startTime = System.nanoTime()
           indexer.indexDirectory(java.io.File(path))
           val elapsed = (System.nanoTime() - startTime) / 1_000_000
-          log(s"indexed ${indexer.symbolCount} symbols in ${indexer.fileCount} files in ${elapsed}ms")
+          log(s"done in ${elapsed}ms — now tracking ${indexer.uniqueSymbolNames} unique symbol names, collected across ${indexer.indexedFiles} files")
 
     rpc.respond(id, ujson.Obj(
       "capabilities" -> ujson.Obj(
@@ -72,8 +83,9 @@ class LspServer(rpc: JsonRpc):
     val uri = td("uri").str
     val text = td("text").str
     log(s"didOpen: $uri (${text.length} chars)")
+    indexer.markOpen(uri)
     indexer.updateFile(uri, text)
-    log(s"  now ${indexer.symbolCount} symbols in ${indexer.fileCount} files")
+    log(s"  now tracking ${indexer.uniqueSymbolNames} unique symbol names, collected across ${indexer.indexedFiles} files")
 
   private def handleDidChange(params: ujson.Value): Unit =
     val uri = params("textDocument")("uri").str
@@ -126,3 +138,51 @@ class LspServer(rpc: JsonRpc):
       )
     )
     rpc.respond(id, result)
+
+  private def handleInitialized(): Unit =
+    log("initialized — registering file watchers")
+    rpc.sendRequest("client/registerCapability", ujson.Obj(
+      "registrations" -> ujson.Arr(
+        ujson.Obj(
+          "id" -> "scala-file-watcher",
+          "method" -> "workspace/didChangeWatchedFiles",
+          "registerOptions" -> ujson.Obj(
+            "watchers" -> ujson.Arr(
+              ujson.Obj(
+                "globPattern" -> "**/*.scala",
+                "kind" -> 7
+              )
+            )
+          )
+        )
+      )
+    ))
+
+  private def handleDidClose(params: ujson.Value): Unit =
+    val uri = params("textDocument")("uri").str
+    log(s"didClose: $uri")
+    indexer.markClosed(uri)
+
+  private def handleDidChangeWatchedFiles(params: ujson.Value): Unit =
+    val changes = params("changes").arr
+    var reindexed = 0
+    var removed = 0
+    var skipped = 0
+    for change <- changes do
+      val uri = change("uri").str
+      val changeType = change("type").num.toInt
+      if indexer.isOpen(uri) then
+        skipped += 1
+      else
+        changeType match
+          case 1 | 2 => // Created or Changed
+            val path = java.net.URI(uri).getPath
+            val file = java.io.File(path)
+            if file.exists() then
+              indexer.reindexFile(uri, file)
+              reindexed += 1
+          case 3 => // Deleted
+            indexer.removeFile(uri)
+            removed += 1
+          case _ => ()
+    log(s"didChangeWatchedFiles: ${changes.size} events — reindexed $reindexed, removed $removed, skipped $skipped open — now tracking ${indexer.uniqueSymbolNames} unique symbol names, collected across ${indexer.indexedFiles} files")

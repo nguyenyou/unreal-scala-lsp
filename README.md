@@ -117,7 +117,7 @@ Based on the [LSP 3.17 Specification](https://microsoft.github.io/language-serve
 | **Workspace** | | |
 | `workspace/symbol` | - | |
 | `workspace/didChangeConfiguration` | - | |
-| `workspace/didChangeWatchedFiles` | - | |
+| `workspace/didChangeWatchedFiles` | Supported | Re-indexes created/changed/deleted `.scala` files |
 | `workspace/executeCommand` | - | |
 
 ## Limitations

@@ -13,11 +13,16 @@ class ScalaIndexer:
   private val definitions = mutable.Map.empty[String, mutable.ListBuffer[SymbolLocation]]
   private val fileSymbols = mutable.Map.empty[String, Set[String]]
   private val fileContents = mutable.Map.empty[String, String]
+  private val openFiles = mutable.Set.empty[String]
+
+  def markOpen(uri: String): Unit = openFiles += uri
+  def markClosed(uri: String): Unit = openFiles -= uri
+  def isOpen(uri: String): Boolean = openFiles.contains(uri)
 
   case class SymbolLocation(uri: String, line: Int, col: Int, endLine: Int, endCol: Int)
 
-  def symbolCount: Int = definitions.size
-  def fileCount: Int = fileSymbols.size
+  def uniqueSymbolNames: Int = definitions.size
+  def indexedFiles: Int = fileSymbols.size
 
   private val skipDirs = Set("out", ".git", ".metals", ".bsp", ".idea", "node_modules", "target")
 
@@ -51,8 +56,8 @@ class ScalaIndexer:
     case _                 => false
 
   /** Scan a file using tokenizer only — no AST. Thread-safe. */
-  private def scanFile(file: java.io.File): FileResult =
-    val uri = file.toURI.toString
+  private def scanFile(file: java.io.File, uriOverride: Option[String] = None): FileResult =
+    val uri = uriOverride.getOrElse(file.toURI.toString)
     val text = java.nio.file.Files.readString(file.toPath)
     val symbols = List.newBuilder[(String, SymbolLocation)]
 
@@ -94,6 +99,12 @@ class ScalaIndexer:
       definitions.getOrElseUpdate(name, mutable.ListBuffer.empty) += loc
       names += name
     fileSymbols(result.uri) = names.toSet
+
+  /** Re-scan a single file from disk (Tier 1 token scan). */
+  def reindexFile(uri: String, file: java.io.File): Unit =
+    removeFile(uri)
+    val result = scanFile(file, Some(uri))
+    mergeResult(result)
 
   /** Index all .scala files under a directory using token scan + virtual threads. */
   def indexDirectory(dir: java.io.File): Unit =

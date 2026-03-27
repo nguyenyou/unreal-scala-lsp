@@ -1,11 +1,13 @@
 package unreallsp
 
 import java.io.{InputStream, OutputStream}
+import java.util.concurrent.atomic.AtomicLong
 import ujson.*
 
 /** Minimal JSON-RPC 2.0 transport over stdin/stdout with Content-Length framing. */
 class JsonRpc(in: InputStream, out: OutputStream):
   private val lock = new Object
+  private val nextId = new AtomicLong(1)
 
   /** Read one JSON-RPC message. Blocks until a full message is available. */
   def read(): ujson.Value =
@@ -29,6 +31,11 @@ class JsonRpc(in: InputStream, out: OutputStream):
   /** Send a response to a request. */
   def respond(id: ujson.Value, result: ujson.Value): Unit =
     write(ujson.Obj("jsonrpc" -> "2.0", "id" -> id, "result" -> result))
+
+  /** Send a server→client request (e.g., client/registerCapability). */
+  def sendRequest(method: String, params: ujson.Value): Unit =
+    val id = nextId.getAndIncrement()
+    write(ujson.Obj("jsonrpc" -> "2.0", "id" -> id, "method" -> method, "params" -> params))
 
   /** Send an error response. */
   def respondError(id: ujson.Value, code: Int, message: String): Unit =
