@@ -1,135 +1,64 @@
 # unreal-scala-lsp
 
-Source-only Scala Language Server. No compiler, no build server — just tokens and text.
+Source-only Scala language server. No compiler, no build server — just tokens and text.
 
-Uses [Scalameta](https://scalameta.org/) to parse Scala files and index top-level definitions (class, trait, object, def, val, type, enum, given).
+## The idea
 
-## Prerequisites
+AI writes the code now. Claude Code with Opus 4.6, Cursor, Copilot — whatever your setup, the agent does the typing. It writes the function, generates the test, wires the module. Your job changed. You read the code. You read the diff. You decide if the change is right.
 
-- Java 17+
-- [Mill](https://mill-build.org/) 1.1.5 (launcher included in repo)
-- [Bun](https://bun.sh/) (for building the VS Code extension)
+Think about what you actually do in an editor today. You open a file. You Cmd+click a symbol to understand where it comes from. You find references to see who uses it. You read. You navigate. You review. That's it.
 
-## Build
+Traditional language servers were built for a different era — one where humans typed every character. They need a compiler running, a build server connected, the whole project imported. They give you completions, signature help, inlay hints, code actions, diagnostics. Features that exist to help you *write*. All that machinery takes time to start, memory to run, and complexity to maintain.
 
-```bash
-# Build the server fat jar
-./mill server.assembly
+But if you're not writing — if the AI is — you don't need any of that.
 
-# Build GraalVM native image (optional, much faster startup)
-./mill server.nativeImage
-```
+You need go-to-definition. You need find-references. You need it to start instantly and stay out of your way.
 
-## VS Code Extension
+## What this is
 
-### Build and install
+A Scala language server that does exactly three things:
 
-```bash
-cd vscode-extension
-bun install
-bun run compile
-bunx @vscode/vsce package
-code --install-extension unreal-scala-lsp-0.1.0.vsix
-```
+- **Go to Definition** — Cmd+click to jump to where a symbol is defined
+- **Find References** — find every usage of a symbol across your workspace
+- **File Watching** — auto-reindex when files change on disk (git checkout, AI edits, external tools)
 
-### Configure
+That's the whole feature set. No completions. No diagnostics. No hover. No code actions. Just navigation.
 
-1. Open VS Code Settings (Cmd+,)
-2. Search for `unrealScalaLsp.serverPath`
-3. Set it to the native binary or assembly jar path:
-   ```
-   /path/to/unreal-scala-lsp/out/server/nativeImage.dest/native-executable
-   ```
-   or:
-   ```
-   /path/to/unreal-scala-lsp/out/server/assembly.dest/out.jar
-   ```
-4. Reload VS Code (Cmd+Shift+P -> "Developer: Reload Window")
+It starts in ~10ms as a native binary. It indexes your workspace using [Scalameta](https://scalameta.org/)'s tokenizer — no compiler, no build tool integration, no SemanticDB. Open a folder, open a Scala file, start navigating.
 
-### Usage
+## How it works
 
-1. Open any folder containing `.scala` files
-2. The server starts automatically when a `.scala` file is opened
-3. **Cmd+click** (or F12) on a symbol name to Go to Definition
+Two-tier indexing, inspired by [Metals](https://scalameta.org/metals/)' `ScalaToplevelMtags`:
 
-## Architecture
+1. **Token scan** — On startup, every `.scala` file is scanned using Scalameta's tokenizer (no AST). Looks for definition keywords (`class`, `trait`, `object`, `def`, `val`, `type`, `enum`, `given`) followed by identifiers, tracking brace depth. Runs in parallel via virtual threads. This is fast — sub-second for large codebases.
 
-### Two-tier indexing
+2. **Full parse** — When you open a file, it gets a full Scalameta AST parse for accurate positions. This is the upgrade path: open files get better data, closed files still have basic indexing.
 
-Inspired by [Metals](https://scalameta.org/metals/)' `ScalaToplevelMtags`:
+The JSON-RPC transport is hand-rolled (~50 lines) over stdin/stdout. No lsp4j, no reflection — GraalVM native-image works out of the box.
 
-- **Tier 1 — Token scan (batch indexing):** Uses Scalameta's tokenizer only (no AST). Scans for definition keywords (`class`, `trait`, `object`, etc.) followed by identifiers, tracking brace depth to stay at toplevel. Runs in parallel via virtual threads (Java 21+).
-- **Tier 2 — Full parse (open files):** When a file is opened or changed (`didOpen`/`didChange`), does a full Scalameta AST parse for accurate positions.
+## Trade-offs
 
-### No lsp4j
+This is not Metals. It doesn't try to be.
 
-The JSON-RPC transport is hand-rolled (~50 lines) using Content-Length framing over stdin/stdout, with [ujson](https://com-lihaoyi.github.io/upickle/) for JSON parsing. This eliminates lsp4j's reflection issues and makes GraalVM native-image work out of the box.
-
-## Comparison with Metals
-
-| Feature | unreal-scala-lsp | Metals |
+| | unreal-scala-lsp | Metals |
 |---|---|---|
-| Go to Definition (workspace) | Name-based matching | Compiler + SemanticDB + fallback chain |
-| Go to Definition (dependencies) | - | Source JARs indexed via SemanticDB |
-| Indexing strategy | Token scan (fast) + full parse (open files) | ScalaToplevelMtags (token scan) + SemanticDB |
-| Type awareness | None (syntax only) | Full (presentation compiler) |
-| Build tool integration | None needed | BSP (sbt, Mill, Gradle, etc.) |
-| Startup time (native) | ~10ms | N/A (JVM only) |
+| Startup | ~10ms (native) | Seconds to minutes |
+| Go to Definition | Name-based | Compiler + SemanticDB |
+| Dependency navigation | No | Yes |
+| Type awareness | None | Full |
+| Build tool integration | None needed | Required (BSP) |
 | GraalVM native image | Yes | No |
-| Dependencies | Scalameta + ujson | Scalameta + lsp4j + Coursier + BSP + ... |
 
-## LSP Feature Coverage
+Name-based matching means if two symbols share the same name, you'll see both. No overload resolution, no implicit tracking. For most navigation, this is fine. When it's not, you'll know.
 
-Based on the [LSP 3.17 Specification](https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/).
+## Install
 
-| LSP Feature | Status | Notes |
-|---|---|---|
-| **General** | | |
-| `initialize` / `shutdown` / `exit` | Supported | |
-| **Text Document Sync** | | |
-| `textDocument/didOpen` | Supported | Triggers full re-index of file |
-| `textDocument/didChange` | Supported | Full sync mode |
-| `textDocument/didClose` | Supported | No-op |
-| `textDocument/didSave` | Supported | No-op |
-| **Language Features** | | |
-| `textDocument/definition` | Supported | Name-based, workspace only |
-| `textDocument/declaration` | - | |
-| `textDocument/typeDefinition` | - | |
-| `textDocument/implementation` | - | |
-| `textDocument/references` | Supported | Text-based word-boundary search |
-| `textDocument/hover` | - | |
-| `textDocument/completion` | - | |
-| `textDocument/signatureHelp` | - | |
-| `textDocument/documentHighlight` | - | |
-| `textDocument/documentSymbol` | - | |
-| `textDocument/codeAction` | - | |
-| `textDocument/codeLens` | - | |
-| `textDocument/formatting` | - | |
-| `textDocument/rangeFormatting` | - | |
-| `textDocument/onTypeFormatting` | - | |
-| `textDocument/rename` | - | |
-| `textDocument/prepareRename` | - | |
-| `textDocument/foldingRange` | - | |
-| `textDocument/selectionRange` | - | |
-| `textDocument/semanticTokens` | - | |
-| `textDocument/inlayHint` | - | |
-| `textDocument/diagnostic` | - | |
-| **Workspace** | | |
-| `workspace/symbol` | - | |
-| `workspace/didChangeConfiguration` | - | |
-| `workspace/didChangeWatchedFiles` | Supported | Re-indexes created/changed/deleted `.scala` files |
-| `workspace/executeCommand` | - | |
+Install the [VS Code extension](https://marketplace.visualstudio.com/items?itemName=nguyenyou.unreal-scala-lsp), open a folder with `.scala` files, and start clicking.
 
-## Limitations
+## Contributing
 
-- Only indexes **workspace** sources — Go to Definition into library/dependency code is not supported
-- Name-based matching — if multiple symbols share the same name, all locations are returned
-- No type-awareness — the indexer parses syntax trees, not types, so it cannot resolve overloads or implicits
+See [CONTRIBUTING.md](CONTRIBUTING.md) for build instructions, architecture details, and development setup.
 
-## Tech stack
+## License
 
-- **Scala 3.8.2** / **Mill 1.1.5**
-- [Scalameta](https://scalameta.org/) 4.15.2 — Scala tokenizer and parser
-- [ujson](https://com-lihaoyi.github.io/upickle/) — JSON parsing (zero reflection)
-- [vscode-languageclient](https://www.npmjs.com/package/vscode-languageclient) 9.0.1 — VS Code LSP client
-- GraalVM native image support (optional)
+MIT
