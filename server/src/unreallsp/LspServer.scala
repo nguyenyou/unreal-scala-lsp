@@ -59,16 +59,6 @@ class LspServer(rpc: JsonRpc):
       val elapsed = (System.nanoTime() - startTime) / 1_000_000
       log(s"done in ${elapsed}ms — now tracking ${indexer.uniqueSymbolNames} unique symbol names, collected across ${indexer.indexedFiles} files")
 
-    // Index external dependency sources from Mill's compile classpath
-    for path <- workspaceRoots do
-      val depIndexer = DependencyIndexer()
-      val startTime = System.nanoTime()
-      val sourceFiles = depIndexer.resolveSourceFiles(java.io.File(path))
-      if sourceFiles.nonEmpty then
-        indexer.indexDependencies(sourceFiles.map(s => (s.file, s.uri)))
-        val elapsed = (System.nanoTime() - startTime) / 1_000_000
-        log(s"indexed ${sourceFiles.size} dependency source files (${indexer.externalSymbolNames} symbols) in ${elapsed}ms")
-
     rpc.respond(id, ujson.Obj(
       "capabilities" -> ujson.Obj(
         "textDocumentSync" -> 1, // Full
