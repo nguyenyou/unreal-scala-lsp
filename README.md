@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="vscode-extension/unreal-logo.png" alt="Unreal Scala LSP" width="128" height="128" />
+</p>
+
 # unreal-scala-lsp
 
 Source-only Scala language server. No compiler, no build server — just tokens and text.
