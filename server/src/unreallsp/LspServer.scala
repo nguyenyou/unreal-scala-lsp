@@ -24,6 +24,7 @@ class LspServer(rpc: JsonRpc):
           case "textDocument/didChange"  => handleDidChange(params)
           case "textDocument/didClose"   => handleDidClose(params)
           case "textDocument/didSave"    => () // no-op
+          case "$/setTrace"              => () // no-op
           case "textDocument/definition"  => id.foreach(i => handleDefinition(i, params))
           case "textDocument/references" => id.foreach(i => handleReferences(i, params))
           case "workspace/didChangeWatchedFiles" => handleDidChangeWatchedFiles(params)
@@ -39,36 +40,34 @@ class LspServer(rpc: JsonRpc):
       .flatMap(v => if v.isNull then None else Some(v.arr.toList))
       .getOrElse(Nil)
 
-    log("unreal-scala-lsp — source-only Scala language server")
-    log("no compiler, no build server — just tokens and text")
+    log("unreal-scala-lsp")
+    log("AI writes the code. You read it, navigate it, review it.")
+    log("No compiler. No build server. Just Cmd+click and go.")
     log("")
-    log("features:")
-    log("  go-to-definition    name-based lookup from a two-tier index")
-    log("                      tier 1: fast token scan (batch, parallel via virtual threads)")
-    log("                      tier 2: full Scalameta AST parse (open files, accurate positions)")
-    log("  find-references     text search with word-boundary matching across all indexed files")
-    log("  file watching       auto-reindex on create/change/delete via workspace/didChangeWatchedFiles")
+    log("  go-to-definition  · find-references  · file watching")
     log("")
-    log(s"initialize: ${folders.size} workspace folders")
 
-    if folders.nonEmpty then
-      for folder <- folders do
-        val uri = folder("uri").str
-        val path = java.net.URI(uri).getPath
-        log(s"indexing $path ...")
-        val startTime = System.nanoTime()
-        indexer.indexDirectory(java.io.File(path))
-        val elapsed = (System.nanoTime() - startTime) / 1_000_000
-        log(s"done in ${elapsed}ms — now tracking ${indexer.uniqueSymbolNames} unique symbol names, collected across ${indexer.indexedFiles} files")
+    val workspaceRoots = if folders.nonEmpty then
+      folders.map(f => java.net.URI(f("uri").str).getPath)
     else
-      params.obj.get("rootUri").foreach: v =>
-        if !v.isNull then
-          val path = java.net.URI(v.str).getPath
-          log(s"indexing $path ...")
-          val startTime = System.nanoTime()
-          indexer.indexDirectory(java.io.File(path))
-          val elapsed = (System.nanoTime() - startTime) / 1_000_000
-          log(s"done in ${elapsed}ms — now tracking ${indexer.uniqueSymbolNames} unique symbol names, collected across ${indexer.indexedFiles} files")
+      params.obj.get("rootUri").flatMap(v => if v.isNull then None else Some(java.net.URI(v.str).getPath)).toList
+
+    for path <- workspaceRoots do
+      log(s"indexing $path ...")
+      val startTime = System.nanoTime()
+      indexer.indexDirectory(java.io.File(path))
+      val elapsed = (System.nanoTime() - startTime) / 1_000_000
+      log(s"done in ${elapsed}ms — now tracking ${indexer.uniqueSymbolNames} unique symbol names, collected across ${indexer.indexedFiles} files")
+
+    // Index external dependency sources from Mill's compile classpath
+    for path <- workspaceRoots do
+      val depIndexer = DependencyIndexer()
+      val startTime = System.nanoTime()
+      val sourceFiles = depIndexer.resolveSourceFiles(java.io.File(path))
+      if sourceFiles.nonEmpty then
+        indexer.indexDependencies(sourceFiles.map(s => (s.file, s.uri)))
+        val elapsed = (System.nanoTime() - startTime) / 1_000_000
+        log(s"indexed ${sourceFiles.size} dependency source files (${indexer.externalSymbolNames} symbols) in ${elapsed}ms")
 
     rpc.respond(id, ujson.Obj(
       "capabilities" -> ujson.Obj(

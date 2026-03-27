@@ -5,7 +5,7 @@ private def log(msg: String): Unit =
 
 object Main:
   def main(args: Array[String]): Unit =
-    log("Starting server v1.0.0")
+    log("Starting server v1.1.0")
     val rpc = JsonRpc(System.in, System.out)
     val server = LspServer(rpc)
     server.loop()

@@ -13,6 +13,7 @@ class ScalaIndexer:
   private val definitions = mutable.Map.empty[String, mutable.ListBuffer[SymbolLocation]]
   private val fileSymbols = mutable.Map.empty[String, Set[String]]
   private val fileContents = mutable.Map.empty[String, String]
+  private val externalDefinitions = mutable.Map.empty[String, mutable.ListBuffer[SymbolLocation]]
   private val openFiles = mutable.Set.empty[String]
 
   def markOpen(uri: String): Unit = openFiles += uri
@@ -22,6 +23,7 @@ class ScalaIndexer:
   case class SymbolLocation(uri: String, line: Int, col: Int, endLine: Int, endCol: Int)
 
   def uniqueSymbolNames: Int = definitions.size
+  def externalSymbolNames: Int = externalDefinitions.size
   def indexedFiles: Int = fileSymbols.size
 
   private val skipDirs = Set("out", ".git", ".metals", ".bsp", ".idea", "node_modules", "target")
@@ -120,6 +122,20 @@ class ScalaIndexer:
     finally
       executor.shutdown()
 
+  /** Index extracted dependency source files using token scan + virtual threads. */
+  def indexDependencies(files: List[(java.io.File, String)]): Unit =
+    if files.isEmpty then return
+    val executor = Executors.newVirtualThreadPerTaskExecutor()
+    try
+      val futures = files.map: (file, uri) =>
+        executor.submit(new Callable[FileResult] { def call() = scanFile(file, Some(uri)) })
+      for future <- futures do
+        val result = future.get()
+        for (name, loc) <- result.symbols do
+          externalDefinitions.getOrElseUpdate(name, mutable.ListBuffer.empty) += loc
+    finally
+      executor.shutdown()
+
   // --- Tier 2: Full parse (single file, didOpen/didChange) ---
 
   def updateFile(uri: String, text: String): Unit =
@@ -173,7 +189,10 @@ class ScalaIndexer:
 
   def findDefinition(uri: String, line: Int, col: Int): List[SymbolLocation] =
     wordAtPosition(uri, line, col) match
-      case Some(w) => definitions.get(w).map(_.toList).getOrElse(Nil)
+      case Some(w) =>
+        val workspace = definitions.get(w).map(_.toList).getOrElse(Nil)
+        if workspace.nonEmpty then workspace
+        else externalDefinitions.get(w).map(_.toList).getOrElse(Nil)
       case None => Nil
 
   /** Find all occurrences of a word across all indexed files. */
