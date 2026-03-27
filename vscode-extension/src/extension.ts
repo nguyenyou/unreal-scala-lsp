@@ -8,7 +8,7 @@ import {
   ServerOptions,
 } from "vscode-languageclient/node";
 
-const VERSION = "1.0.0";
+const VERSION = "1.3.0";
 const REPO = "nguyenyou/unreal-scala-lsp";
 
 let client: LanguageClient | undefined;
@@ -26,7 +26,10 @@ export async function activate(context: vscode.ExtensionContext) {
     : { command: serverPath };
 
   const clientOptions: LanguageClientOptions = {
-    documentSelector: [{ scheme: "file", language: "scala" }],
+    documentSelector: [
+      { scheme: "file", language: "scala" },
+      { scheme: "file", language: "java" },
+    ],
   };
 
   client = new LanguageClient(

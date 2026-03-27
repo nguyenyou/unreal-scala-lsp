@@ -4,7 +4,7 @@ import ujson.*
 
 /** LSP server that dispatches JSON-RPC methods to handlers. */
 class LspServer(rpc: JsonRpc):
-  private val indexer = ScalaIndexer()
+  private val indexer = Indexer()
 
   def loop(): Unit =
     var running = true
@@ -28,6 +28,7 @@ class LspServer(rpc: JsonRpc):
           case "textDocument/definition"  => id.foreach(i => handleDefinition(i, params))
           case "textDocument/references" => id.foreach(i => handleReferences(i, params))
           case "workspace/didChangeWatchedFiles" => handleDidChangeWatchedFiles(params)
+          case ""                        => () // response message (no method) — ignore
           case other                     => log(s"unhandled: $other")
       catch
         case e: RuntimeException if e.getMessage == "EOF" =>
@@ -139,6 +140,10 @@ class LspServer(rpc: JsonRpc):
             "watchers" -> ujson.Arr(
               ujson.Obj(
                 "globPattern" -> "**/*.scala",
+                "kind" -> 7
+              ),
+              ujson.Obj(
+                "globPattern" -> "**/*.java",
                 "kind" -> 7
               )
             )
