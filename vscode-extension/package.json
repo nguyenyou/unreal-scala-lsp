@@ -31,6 +31,17 @@
           "type": "boolean",
           "default": false,
           "description": "Use compiler-precise mode with presentation compiler for full semantic analysis (experimental)"
+        },
+        "unrealScalaLsp.trace.server": {
+          "type": "string",
+          "enum": ["off", "messages", "verbose"],
+          "default": "off",
+          "description": "Traces the communication between VS Code and the LSP server"
+        },
+        "unrealScalaLsp.debug": {
+          "type": "boolean",
+          "default": false,
+          "description": "Enable verbose debug logging in the LSP server (visible in Output > Unreal Scala LSP)"
         }
       }
     }

@@ -5,6 +5,7 @@ import * as vscode from "vscode";
 import {
   LanguageClient,
   LanguageClientOptions,
+  RevealOutputChannelOn,
   ServerOptions,
 } from "vscode-languageclient/node";
 
@@ -12,20 +13,33 @@ const VERSION = "1.3.0";
 const REPO = "nguyenyou/unreal-scala-lsp";
 
 let client: LanguageClient | undefined;
+let outputChannel: vscode.OutputChannel | undefined;
 
 export async function activate(context: vscode.ExtensionContext) {
   // Allow manual override
   const config = vscode.workspace.getConfiguration("unrealScalaLsp");
   const manualPath = config.get<string>("serverPath", "");
+  const debug = config.get<boolean>("debug", false);
 
   const serverPath = manualPath || (await ensureBinary(context));
   if (!serverPath) return;
 
+  outputChannel = vscode.window.createOutputChannel("Unreal Scala LSP");
+
+  const args: string[] = [];
+  if (serverPath.endsWith(".jar")) {
+    args.push("-jar", serverPath);
+  }
+  if (debug) {
+    args.push("--debug");
+  }
+
   const serverOptions: ServerOptions = serverPath.endsWith(".jar")
-    ? { command: "java", args: ["-jar", serverPath] }
-    : { command: serverPath };
+    ? { command: "java", args }
+    : { command: serverPath, args: debug ? ["--debug"] : [] };
 
   const compilerPrecise = config.get<boolean>("compilerPrecise", false);
+  const traceServer = config.get<string>("trace.server", "off");
 
   const clientOptions: LanguageClientOptions = {
     documentSelector: [
@@ -34,7 +48,13 @@ export async function activate(context: vscode.ExtensionContext) {
     ],
     initializationOptions: {
       compilerPrecise,
+      debug,
     },
+    outputChannel,
+    traceOutputChannel: outputChannel,
+    revealOutputChannelOn: debug
+      ? RevealOutputChannelOn.Info
+      : RevealOutputChannelOn.Never,
   };
 
   client = new LanguageClient(
@@ -42,6 +62,14 @@ export async function activate(context: vscode.ExtensionContext) {
     "Unreal Scala LSP",
     serverOptions,
     clientOptions
+  );
+
+  client.setTrace(
+    traceServer === "verbose"
+      ? 2 /* Verbose */
+      : traceServer === "messages"
+        ? 1 /* Messages */
+        : 0 /* Off */
   );
 
   client.start();
