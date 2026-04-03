@@ -70,7 +70,7 @@ class CompilerProvider extends LanguageProvider {
               for (diag <- pc.diagnosticsForDebuggingPurposes().asScala) {
                 debug(s"  pc-diag: $diag")
               }
-              result.locations().asScala.toList.map(toSymbolLocation)
+              result.locations().asScala.toList.map(toSymbolLocation).distinctBy(l => (l.uri, l.line, l.col))
             } catch {
               case e: Exception => {
                 log(s"compiler-precise: definition error: ${e.getMessage}")
@@ -130,7 +130,7 @@ class CompilerProvider extends LanguageProvider {
     }
     debug(s"  scalacOptions: ${mod.scalacOptions}")
     val cp = mod.classpath.map(p => Path.of(p))
-    val sourceCacheDir = workspaceRoot.toPath.resolve(".scalex").resolve("sources-cache")
+    val sourceCacheDir = workspaceRoot.toPath.resolve(".scalex").resolve("readonly")
     val search = WorkspaceSymbolSearch(allModules, sourceCacheDir)
     ScalaPresentationCompiler(
       buildTargetIdentifier = mod.name,

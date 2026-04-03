@@ -27,18 +27,12 @@
           "default": "",
           "description": "Path to the unreal-scala-lsp native binary or assembly jar"
         },
-        "unrealScalaLsp.compilerPrecise": {
+        "unrealScalaLsp.usePresentationCompiler": {
           "type": "boolean",
           "default": false,
-          "description": "Use compiler-precise mode with presentation compiler for full semantic analysis (experimental)"
+          "description": "Presentation compiler magic for precise go-to-definition. It works until it doesn't — then AST saves the day."
         },
-        "unrealScalaLsp.trace.server": {
-          "type": "string",
-          "enum": ["off", "messages", "verbose"],
-          "default": "off",
-          "description": "Traces the communication between VS Code and the LSP server"
-        },
-        "unrealScalaLsp.debug": {
+"unrealScalaLsp.debug": {
           "type": "boolean",
           "default": false,
           "description": "Enable verbose debug logging in the LSP server (visible in Output > Unreal Scala LSP)"

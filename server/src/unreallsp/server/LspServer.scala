@@ -38,7 +38,7 @@ class LspServer(rpc: JsonRpc) {
           case "textDocument/didChange"  => handleDidChange(params)
           case "textDocument/didClose"   => handleDidClose(params)
           case "textDocument/didSave"    => debug("didSave (no-op)")
-          case "$/setTrace"              => debug("setTrace (no-op)")
+          case "$/setTrace"              => () // no-op
           case "textDocument/definition"  => id.foreach(i => handleDefinition(i, params))
           case "textDocument/references" => id.foreach(i => handleReferences(i, params))
           case "workspace/didChangeWatchedFiles" => handleDidChangeWatchedFiles(params)
@@ -64,8 +64,8 @@ class LspServer(rpc: JsonRpc) {
     val initOpts = params.obj.get("initializationOptions")
       .flatMap(v => if (v.isNull) { None } else { Some(v) })
 
-    val compilerPrecise = initOpts
-      .flatMap(v => v.obj.get("compilerPrecise"))
+    val usePresentationCompiler = initOpts
+      .flatMap(v => v.obj.get("usePresentationCompiler"))
       .exists(_.bool)
 
     // Allow debug to be enabled via initializationOptions too
@@ -77,11 +77,11 @@ class LspServer(rpc: JsonRpc) {
       log("debug logging enabled via initializationOptions")
     }
 
-    provider = if (compilerPrecise) { HybridProvider() } else { AstProvider() }
+    provider = if (usePresentationCompiler) { HybridProvider() } else { AstProvider() }
 
     log("unreal-scala-lsp")
     log("AI writes the code. You read it, navigate it, review it.")
-    if (compilerPrecise) {
+    if (usePresentationCompiler) {
       log("Mode: hybrid (PC definition + AST references/fallback)")
     } else {
       log("Mode: AST-based (fast, no compiler)")
@@ -91,7 +91,7 @@ class LspServer(rpc: JsonRpc) {
     log("")
 
     debug(s"initializationOptions: ${initOpts.map(ujson.write(_)).getOrElse("null")}")
-    debug(s"compilerPrecise=$compilerPrecise debugEnabled=${isDebugEnabled}")
+    debug(s"usePresentationCompiler=$usePresentationCompiler debugEnabled=${isDebugEnabled}")
 
     val workspaceRoots = if (folders.nonEmpty) {
       folders.map(f => java.net.URI(f("uri").str).getPath)

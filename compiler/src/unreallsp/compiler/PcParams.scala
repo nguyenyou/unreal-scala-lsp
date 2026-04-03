@@ -60,7 +60,7 @@ private[compiler] case class SymbolTarget(
   * For workspace symbols: scans module source roots for matching files.
   * For library symbols: reads the classfile's SourceFile attribute via ASM to find
   * the exact source filename, then extracts it from the companion -sources.jar
-  * to a cache directory. */
+  * to a readonly cache directory (same approach as Metals' .metals/readonly/). */
 private[compiler] class WorkspaceSymbolSearch(
   allModules: List[MillModule],
   cacheDir: Path,
@@ -111,7 +111,12 @@ private[compiler] class WorkspaceSymbolSearch(
   // ── Workspace sources ───────────────────────────────────────────────────
 
   private def findInWorkspace(target: SymbolTarget): Option[Location] = {
-    val direct = allModules.iterator.flatMap(_.sourceRoots).collectFirst {
+    debug(s"  workspace: looking for ${target.packageDirFs}/${target.className}.scala")
+    val allRoots = allModules.flatMap(_.sourceRoots)
+    // Prefer real source roots over generated/copied sources in out/
+    val (realRoots, outRoots) = allRoots.partition(r => !r.contains("/out/"))
+    val orderedRoots = realRoots ++ outRoots
+    val direct = orderedRoots.iterator.collectFirst {
       case root if {
         val dir = Path.of(root, target.packageDirFs)
         Files.isDirectory(dir) && Files.isRegularFile(dir.resolve(target.className + ".scala"))
@@ -148,7 +153,7 @@ private[compiler] class WorkspaceSymbolSearch(
     val classfilePath = toClassfilePath(symbol, target.topLevel)
     debug(s"  searching classpath for $classfilePath")
 
-    val allCp = allModules.flatMap(_.classpath)
+    val allCp = allModules.flatMap(_.classpath).distinct
     allCp.iterator
       .filter(_.endsWith(".jar"))
       .flatMap { cpJar =>
@@ -216,12 +221,60 @@ private[compiler] class WorkspaceSymbolSearch(
           debug(s"  found source jar: $candidate")
           Some(candidate)
         } else {
-          None
+          debug(s"  no local source jar at $candidate, trying coursier fetch")
+          fetchSourceJar(p)
         }
       } else {
         None
       }
     })
+  }
+
+  /** Extract Maven coordinates from a Coursier cache path and fetch the sources JAR.
+    * Path pattern: .../maven2/group/artifact/version/artifact-version.jar */
+  private def fetchSourceJar(jarPath: Path): Option[Path] = {
+    try {
+      val abs = jarPath.toAbsolutePath.toString
+      // Find the maven2/ prefix to extract coordinates
+      val mavenIdx = abs.indexOf("/maven2/")
+      if (mavenIdx < 0) {
+        None
+      } else {
+        val afterMaven = abs.substring(mavenIdx + "/maven2/".length)
+        val parts = afterMaven.split("/")
+        // parts: [group, ..., group, artifact, version, filename.jar]
+        if (parts.length < 3) {
+          None
+        } else {
+          val version = parts(parts.length - 2)
+          val artifact = parts(parts.length - 3)
+          val group = parts.take(parts.length - 3).mkString(".")
+          val coord = s"$group:$artifact:$version"
+          debug(s"  fetching sources jar for $coord")
+          val pb = new ProcessBuilder("coursier", "fetch", "--sources", coord)
+          pb.redirectErrorStream(true)
+          val proc = pb.start()
+          val output = new String(proc.getInputStream.readAllBytes()).trim
+          val exitCode = proc.waitFor()
+          if (exitCode == 0) {
+            val sourcePaths = output.split("\n").filter(_.endsWith("-sources.jar"))
+            sourcePaths.headOption.map { sp =>
+              val srcPath = Path.of(sp)
+              debug(s"  fetched source jar: $srcPath")
+              srcPath
+            }
+          } else {
+            debug(s"  coursier fetch failed (exit $exitCode)")
+            None
+          }
+        }
+      }
+    } catch {
+      case e: Exception => {
+        debug(s"  fetchSourceJar error: ${e.getMessage}")
+        None
+      }
+    }
   }
 
   private def extractSourceEntry(srcJarPath: Path, entryPath: String, target: SymbolTarget): Option[Location] = {
@@ -273,7 +326,6 @@ private[compiler] class WorkspaceSymbolSearch(
         try {
           val jar = new JarFile(srcZip.toFile)
           try {
-            // Try common modules: java.base, java.desktop, java.sql, java.net.http, etc.
             val entry = findJdkEntry(jar, sourcePath)
             entry.flatMap { e =>
               val destFile = cacheDir.resolve("jdk-src").resolve(e.getName)

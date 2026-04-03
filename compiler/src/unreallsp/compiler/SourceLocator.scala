@@ -30,13 +30,35 @@ object SourceLocator {
     }
   }
 
+  /** Locate a symbol in source content already read into memory.
+    * Returns a Location with the given URI (e.g. a jar: URI). */
+  def locateInSource(uri: String, source: String, target: SymbolTarget): Location = {
+    try {
+      if (uri.endsWith(".java")) {
+        locateJavaInSource(uri, source, target)
+      } else {
+        locateScalaInSource(uri, source, target)
+      }
+    } catch {
+      case e: Exception => {
+        debug(s"  SourceLocator error: ${e.getMessage}")
+        new Location(uri, new Range(new Position(0, 0), new Position(0, 0)))
+      }
+    }
+  }
+
   // ── Scala (scalameta) ───────────────────────────────────────────────────
 
   private def locateInScala(path: Path, target: SymbolTarget): Location = {
     val source = new String(Files.readAllBytes(path))
+    locateScalaInSource(path.toUri.toString, source, target)
+  }
+
+  private def locateScalaInSource(uri: String, source: String, target: SymbolTarget): Location = {
     implicit val dialect: Dialect = dialects.Scala3
-    val input = Input.VirtualFile(path.toString, source)
+    val input = Input.VirtualFile(uri, source)
     val parsed = input.parse[Source]
+    val defaultLoc = new Location(uri, new Range(new Position(0, 0), new Position(0, 0)))
     parsed match {
       case Parsed.Success(ast) => {
         val pos = target.member match {
@@ -50,14 +72,14 @@ object SourceLocator {
           case Some(metaPos) => {
             val start = new Position(metaPos.startLine, metaPos.startColumn)
             val end = new Position(metaPos.endLine, metaPos.endColumn)
-            new Location(path.toUri.toString, new Range(start, end))
+            new Location(uri, new Range(start, end))
           }
-          case None => defaultLocation(path)
+          case None => defaultLoc
         }
       }
       case _ => {
         debug(s"  SourceLocator: scalameta parse failed, falling back to text search")
-        locateByText(path, source, target)
+        locateByTextInSource(uri, source, target)
       }
     }
   }
@@ -180,12 +202,17 @@ object SourceLocator {
 
   private def locateInJava(path: Path, target: SymbolTarget): Location = {
     val source = new String(Files.readAllBytes(path))
+    locateJavaInSource(path.toUri.toString, source, target)
+  }
+
+  private def locateJavaInSource(uri: String, source: String, target: SymbolTarget): Location = {
+    val defaultLoc = new Location(uri, new Range(new Position(0, 0), new Position(0, 0)))
     val compiler = ToolProvider.getSystemJavaCompiler()
     if (compiler == null) {
       debug(s"  no system Java compiler available")
-      defaultLocation(path)
+      defaultLoc
     } else {
-      val fileObject = new SourceString(path.toUri, source)
+      val fileObject = new SourceString(URI(uri), source)
       val task = compiler.getTask(
         null, // writer
         null, // fileManager
@@ -197,7 +224,7 @@ object SourceLocator {
 
       val compilationUnits = task.parse().asScala.toList
       compilationUnits.headOption match {
-        case None => defaultLocation(path)
+        case None => defaultLoc
         case Some(cu) => {
           val trees = Trees.instance(task)
           val sourcePositions = trees.getSourcePositions()
@@ -214,9 +241,9 @@ object SourceLocator {
             case Some((line, col, endCol)) => {
               val start = new Position(line, col)
               val end = new Position(line, endCol)
-              new Location(path.toUri.toString, new Range(start, end))
+              new Location(uri, new Range(start, end))
             }
-            case None => defaultLocation(path)
+            case None => defaultLoc
           }
         }
       }
@@ -331,7 +358,7 @@ object SourceLocator {
   /** When scalameta can't parse the file (e.g. capture checking syntax),
     * fall back to finding the declaration by text pattern.
     * We already know the exact class and member name from the compiler. */
-  private def locateByText(path: Path, source: String, target: SymbolTarget): Location = {
+  private def locateByTextInSource(uri: String, source: String, target: SymbolTarget): Location = {
     val searchName = target.member.getOrElse(target.className)
     val declKeywords = List("def ", "val ", "var ", "type ", "class ", "trait ", "object ", "enum ", "given ")
     val lines = source.split("\n", -1)
@@ -351,9 +378,9 @@ object SourceLocator {
     }
     found match {
       case Some((line, col, endCol)) => {
-        new Location(path.toUri.toString, new Range(new Position(line, col), new Position(line, endCol)))
+        new Location(uri, new Range(new Position(line, col), new Position(line, endCol)))
       }
-      case None => defaultLocation(path)
+      case None => new Location(uri, new Range(new Position(0, 0), new Position(0, 0)))
     }
   }
 

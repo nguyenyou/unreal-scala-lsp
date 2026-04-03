@@ -38,8 +38,7 @@ export async function activate(context: vscode.ExtensionContext) {
     ? { command: "java", args }
     : { command: serverPath, args: debug ? ["--debug"] : [] };
 
-  const compilerPrecise = config.get<boolean>("compilerPrecise", false);
-  const traceServer = config.get<string>("trace.server", "off");
+  const usePresentationCompiler = config.get<boolean>("usePresentationCompiler", false);
 
   const clientOptions: LanguageClientOptions = {
     documentSelector: [
@@ -47,11 +46,10 @@ export async function activate(context: vscode.ExtensionContext) {
       { scheme: "file", language: "java" },
     ],
     initializationOptions: {
-      compilerPrecise,
+      usePresentationCompiler,
       debug,
     },
     outputChannel,
-    traceOutputChannel: outputChannel,
     revealOutputChannelOn: debug
       ? RevealOutputChannelOn.Info
       : RevealOutputChannelOn.Never,
@@ -62,14 +60,6 @@ export async function activate(context: vscode.ExtensionContext) {
     "Unreal Scala LSP",
     serverOptions,
     clientOptions
-  );
-
-  client.setTrace(
-    traceServer === "verbose"
-      ? 2 /* Verbose */
-      : traceServer === "messages"
-        ? 1 /* Messages */
-        : 0 /* Off */
   );
 
   client.start();
