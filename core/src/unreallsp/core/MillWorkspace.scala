@@ -61,13 +61,22 @@ object MillWorkspace {
     val scalaVersion = readStringValue(File(dir, "scalaVersion.json"))
     val scalacOptions = readStringList(File(dir, "scalacOptions.json"))
 
-    if (classpath.isEmpty && sourceRoots.isEmpty) {
+    // Add the module's own compiled classes to the classpath so the
+    // presentation compiler can resolve symbols within the same module.
+    val compileOutput = File(dir, "compile.dest/classes")
+    val fullClasspath = if (compileOutput.isDirectory) {
+      compileOutput.getAbsolutePath :: classpath
+    } else {
+      classpath
+    }
+
+    if (fullClasspath.isEmpty && sourceRoots.isEmpty) {
       None
     } else {
       Some(MillModule(
         name = name,
         sourceRoots = sourceRoots,
-        classpath = classpath,
+        classpath = fullClasspath,
         scalaVersion = scalaVersion.getOrElse(""),
         scalacOptions = scalacOptions,
       ))

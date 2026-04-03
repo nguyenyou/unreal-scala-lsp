@@ -155,7 +155,7 @@ class CompilerProvider extends LanguageProvider {
     }
     debug(s"  scalacOptions: ${mod.scalacOptions}")
     val cp = mod.classpath.map(p => Path.of(p))
-    val sourceCacheDir = workspaceRoot.toPath.resolve(".unreal-scala-lsp").resolve("sources-cache")
+    val sourceCacheDir = workspaceRoot.toPath.resolve(".scalex").resolve("sources-cache")
     val search = WorkspaceSymbolSearch(allModules, sourceCacheDir)
     ScalaPresentationCompiler(
       buildTargetIdentifier = mod.name,

@@ -9,6 +9,8 @@ import java.util.concurrent.{CompletableFuture, CompletionStage}
 import java.util.jar.JarFile
 import scala.jdk.CollectionConverters.*
 import scala.collection.mutable
+import scala.meta.internal.semanticdb.Scala.*
+import scala.meta.internal.semanticdb.Scala.{Descriptor => d}
 import scala.meta.pc.{CancelToken, ContentType, OffsetParams, ParentSymbols, SymbolDocumentation, SymbolSearch, SymbolSearchVisitor, VirtualFileParams, ReferencesRequest, OutlineFiles}
 import org.eclipse.lsp4j.{Location, Position, Range}
 import org.eclipse.lsp4j.jsonrpc.messages.Either
@@ -84,7 +86,9 @@ private[compiler] class WorkspaceSymbolSearch(
       java.util.Collections.emptyList()
     } else {
       val target = SymbolTarget(topLevel, extractMember(symbol))
-      val loc = findInWorkspace(target).orElse(findInSourceJars(symbol, target))
+      val loc = findInWorkspace(target)
+        .orElse(findInSourceJars(symbol, target))
+        .orElse(findInJdkSources(target))
       loc match {
         case Some(l) => java.util.Collections.singletonList(l)
         case None => {
@@ -133,7 +137,7 @@ private[compiler] class WorkspaceSymbolSearch(
 
   private def findByPackageDecl(target: SymbolTarget): Option[Location] = {
     val packageName = target.parts.init.mkString(".")
-    val patterns = declPatterns(target.className)
+    val declKeywords = List("class ", "object ", "trait ", "enum ")
     allModules.iterator
       .flatMap(m => m.sourceRoots.iterator.map(Path.of(_)))
       .filter(Files.isDirectory(_))
@@ -143,7 +147,7 @@ private[compiler] class WorkspaceSymbolSearch(
           try {
             val content = Files.readString(file)
             val hasPackage = packageName.isEmpty || content.contains(s"package $packageName")
-            hasPackage && patterns.exists(p => content.contains(p))
+            hasPackage && declKeywords.exists(kw => content.contains(kw + target.className))
           } catch { case _: Exception => false }
         } => locateInFile(file, target)
       }
@@ -262,116 +266,135 @@ private[compiler] class WorkspaceSymbolSearch(
     }
   }
 
-  // ── Symbol parsing ──────────────────────────────────────────────────────
+  // ── JDK sources ─────────────────────────────────────────────────────────
 
-  /** Extract the top-level type from a semanticdb symbol. */
-  private def extractTopLevel(symbol: String): String = {
-    val s = symbol.stripSuffix(".").stripSuffix("#")
-    val hashIdx = s.indexOf('#')
-    val base = if (hashIdx > 0) { s.substring(0, hashIdx) } else { s }
-    val dotIdx = base.lastIndexOf('.')
-    if (dotIdx > 0 && base.substring(dotIdx).contains("(")) {
-      base.substring(0, dotIdx)
-    } else {
-      base
-    }
-  }
-
-  /** Extract the member name from a semanticdb symbol, if any.
-    * `scala/collection/immutable/List.newBuilder().` -> Some("newBuilder")
-    * `scala/collection/immutable/List#head.`         -> Some("head")
-    * `scala/collection/immutable/List.`              -> None
-    * `scala/collection/immutable/List#`              -> None */
-  private def extractMember(symbol: String): Option[String] = {
-    // Find the boundary between type and member: first `#` or `.` after the last `/`
-    val lastSlash = symbol.lastIndexOf('/')
-    val afterType = symbol.substring(lastSlash + 1)
-    // afterType e.g. "List.newBuilder()." or "List#head." or "List."
-    val sepIdx = afterType.indexWhere(c => c == '#' || c == '.')
-    if (sepIdx < 0) {
+  /** Resolve JDK symbols (java/lang/String etc.) from $JAVA_HOME/lib/src.zip.
+    * Entries are prefixed with the module name: `java.base/java/lang/String.java`. */
+  private def findInJdkSources(target: SymbolTarget): Option[Location] = {
+    val javaHome = System.getProperty("java.home")
+    if (javaHome == null) {
       None
     } else {
-      val rest = afterType.substring(sepIdx + 1) // e.g. "newBuilder()." or "head." or ""
-      if (rest.isEmpty || rest == "." || rest == "#") {
+      val srcZip = Path.of(javaHome, "lib", "src.zip")
+      if (!Files.isRegularFile(srcZip)) {
         None
       } else {
-        // Extract just the name part (strip parens, trailing . or #)
-        val nameEnd = rest.indexWhere(c => c == '(' || c == '.' || c == '#')
-        if (nameEnd <= 0) {
-          None
-        } else {
-          Some(rest.substring(0, nameEnd))
+        debug(s"  searching JDK src.zip for ${target.topLevel}")
+        val sourcePath = target.topLevel + ".java"
+        try {
+          val jar = new JarFile(srcZip.toFile)
+          try {
+            // Try common modules: java.base, java.desktop, java.sql, java.net.http, etc.
+            val entry = findJdkEntry(jar, sourcePath)
+            entry.flatMap { e =>
+              val destFile = cacheDir.resolve("jdk-src").resolve(e.getName)
+              if (!Files.isRegularFile(destFile)) {
+                Files.createDirectories(destFile.getParent)
+                val is = jar.getInputStream(e)
+                try {
+                  Files.copy(is, destFile)
+                } finally {
+                  is.close()
+                }
+              }
+              debug(s"  extracted JDK source to $destFile")
+              Some(locateInFile(destFile, target))
+            }
+          } finally {
+            jar.close()
+          }
+        } catch {
+          case _: Exception => None
         }
       }
     }
   }
 
-  /** Convert a semanticdb symbol to the classfile path to look up. */
+  private def findJdkEntry(jar: JarFile, sourcePath: String): Option[java.util.jar.JarEntry] = {
+    // Try well-known modules first for speed
+    val modules = List("java.base", "java.desktop", "java.sql", "java.net.http",
+      "java.logging", "java.xml", "java.naming", "java.compiler", "java.management")
+    modules.iterator.map(m => jar.getEntry(s"$m/$sourcePath")).collectFirst {
+      case e if e != null => e.asInstanceOf[java.util.jar.JarEntry]
+    }.orElse {
+      // Fallback: scan all entries
+      val entries = jar.entries()
+      var found: Option[java.util.jar.JarEntry] = None
+      while (entries.hasMoreElements && found.isEmpty) {
+        val e = entries.nextElement()
+        if (e.getName.endsWith("/" + sourcePath) || e.getName == sourcePath) {
+          found = Some(e)
+        }
+      }
+      found
+    }
+  }
+
+  // ── Symbol parsing (uses scalameta's semanticdb symbol parser) ──────────
+
+  /** Walk up the owner chain to find the first non-package symbol.
+    * That's our "top-level type" for classfile/source lookup.
+    * E.g. `scala/Predef.String#` → owner chain: String# → Predef. → scala/ → _root_
+    *   First non-package = `scala/Predef.` → top-level = `scala/Predef` */
+  private def extractTopLevel(symbol: String): String = {
+    if (!symbol.isGlobal) { "" }
+    else {
+      // Walk up: if the symbol's owner is a package, the symbol itself is top-level.
+      // Otherwise the owner (or its owner, etc.) is the top-level.
+      def findTopLevel(sym: String): String = {
+        val ownerSym = sym.owner
+        if (ownerSym.isPackage || ownerSym.isNone) {
+          // sym is the top-level — strip trailing . or #
+          sym.stripSuffix(".").stripSuffix("#")
+        } else {
+          findTopLevel(ownerSym)
+        }
+      }
+      findTopLevel(symbol)
+    }
+  }
+
+  /** Extract the member name if the symbol is nested inside a top-level type.
+    * E.g. `scala/Predef.String#` → Some("String")
+    *       `scala/collection/immutable/List.newBuilder().` → Some("newBuilder")
+    *       `scala/collection/immutable/List#` → None */
+  private def extractMember(symbol: String): Option[String] = {
+    if (!symbol.isGlobal) { None }
+    else {
+      val ownerSym = symbol.owner
+      if (ownerSym.isPackage || ownerSym.isNone) {
+        // Symbol is itself the top-level — no member
+        None
+      } else {
+        // Symbol is a member; extract its name from the descriptor
+        val desc = symbol.desc
+        desc match {
+          case d.Term(value) => Some(value)
+          case d.Type(value) => Some(value)
+          case d.Method(value, _) => Some(value)
+          case _ => None
+        }
+      }
+    }
+  }
+
+  /** Convert a semanticdb symbol to the classfile path for the top-level type.
+    * Objects get `$` appended. */
   private def toClassfilePath(symbol: String, topLevel: String): String = {
-    val isObject = symbol.indexOf('#') < 0 && !symbol.endsWith("#")
-    if (isObject) { topLevel + "$.class" } else { topLevel + ".class" }
+    // Find the top-level symbol itself (not the member) and check if it's a term (object)
+    def findTopLevelSymbol(sym: String): String = {
+      val ownerSym = sym.owner
+      if (ownerSym.isPackage || ownerSym.isNone) { sym }
+      else { findTopLevelSymbol(ownerSym) }
+    }
+    val tlSym = findTopLevelSymbol(symbol)
+    if (tlSym.isTerm) { topLevel + "$.class" } else { topLevel + ".class" }
   }
 
   // ── Source location helpers ─────────────────────────────────────────────
 
-  private def declPatterns(name: String): List[String] = List(
-    s"class $name", s"object $name", s"trait $name", s"enum $name",
-  )
-
-  /** Find the precise location of a symbol target in a source file.
-    * If the target has a member, search for `def/val/var/lazy val/type memberName`.
-    * Otherwise, search for the class/object/trait/enum declaration. */
   private def locateInFile(path: Path, target: SymbolTarget): Location = {
-    try {
-      val lines = Files.readAllLines(path)
-      target.member match {
-        case Some(memberName) => {
-          // Search for member declaration
-          val memberPatterns = List(
-            s"def $memberName",
-            s"val $memberName",
-            s"var $memberName",
-            s"lazy val $memberName",
-            s"type $memberName",
-          )
-          findPattern(path, lines, memberPatterns, memberName)
-            .getOrElse(findPattern(path, lines, declPatterns(target.className), target.className)
-              .getOrElse(defaultLocation(path)))
-        }
-        case None => {
-          findPattern(path, lines, declPatterns(target.className), target.className)
-            .getOrElse(defaultLocation(path))
-        }
-      }
-    } catch {
-      case _: Exception => defaultLocation(path)
-    }
-  }
-
-  /** Search lines for any of the given patterns, returning a Location pointing to `name`. */
-  private def findPattern(path: Path, lines: java.util.List[String], patterns: List[String], name: String): Option[Location] = {
-    var i = 0
-    var result: Option[Location] = None
-    while (i < lines.size() && result.isEmpty) {
-      val line = lines.get(i)
-      var j = 0
-      while (j < patterns.size && result.isEmpty) {
-        val idx = line.indexOf(patterns(j))
-        if (idx >= 0) {
-          val col = idx + patterns(j).length - name.length
-          val start = new Position(i, col)
-          val end = new Position(i, col + name.length)
-          result = Some(new Location(path.toUri.toString, new Range(start, end)))
-        }
-        j += 1
-      }
-      i += 1
-    }
-    result
-  }
-
-  private def defaultLocation(path: Path): Location = {
-    new Location(path.toUri.toString, new Range(new Position(0, 0), new Position(0, 0)))
+    SourceLocator.locate(path, target)
   }
 
   private def findScalaFiles(dir: Path): List[Path] = {
