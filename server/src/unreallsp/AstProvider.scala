@@ -20,15 +20,13 @@ class AstProvider extends LanguageProvider {
 
   def isOpen(uri: String): Boolean = indexer.isOpen(uri)
 
-  def definition(uri: String, line: Int, col: Int): List[SymbolLocation] =
-    indexer.findDefinition(uri, line, col)
+  def definition(uri: String, line: Int, col: Int): List[SymbolLocation] = indexer.findDefinition(uri, line, col)
 
-  def references(uri: String, line: Int, col: Int, includeDeclaration: Boolean): List[SymbolLocation] =
-    indexer.findReferences(uri, line, col, includeDeclaration)
+  def references(uri: String, line: Int, col: Int, includeDeclaration: Boolean): List[SymbolLocation] = indexer.findReferences(uri, line, col, includeDeclaration)
 
-  def wordAtPosition(uri: String, line: Int, col: Int): Option[String] =
-    indexer.wordAtPosition(uri, line, col)
+  def wordAtPosition(uri: String, line: Int, col: Int): Option[String] = indexer.wordAtPosition(uri, line, col)
 
   def uniqueSymbolNames: Int = indexer.uniqueSymbolNames
+
   def indexedFiles: Int = indexer.indexedFiles
 }

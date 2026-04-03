@@ -4,19 +4,19 @@ import ujson.*
 import scala.compiletime.uninitialized
 
 /** LSP server that dispatches JSON-RPC methods to handlers. */
-class LspServer(rpc: JsonRpc):
+class LspServer(rpc: JsonRpc) {
   private var provider: LanguageProvider = uninitialized
 
-  def loop(): Unit =
+  def loop(): Unit = {
     var running = true
-    while running do
-      try
+    while (running) {
+      try {
         val msg = rpc.read()
         val method = msg.obj.get("method").map(_.str).getOrElse("")
         val id = msg.obj.get("id")
         val params = msg.obj.getOrElse("params", ujson.Obj())
 
-        method match
+        method match {
           case "initialize"              => handleInitialize(id.get, params)
           case "initialized"             => handleInitialized()
           case "shutdown"                => id.foreach(i => rpc.respond(i, ujson.Null)); running = false
@@ -31,44 +31,51 @@ class LspServer(rpc: JsonRpc):
           case "workspace/didChangeWatchedFiles" => handleDidChangeWatchedFiles(params)
           case ""                        => () // response message (no method) — ignore
           case other                     => log(s"unhandled: $other")
-      catch
+        }
+      } catch {
         case e: RuntimeException if e.getMessage == "EOF" =>
           running = false
         case e: Exception =>
           log(s"error: ${e.getMessage}")
+      }
+    }
+  }
 
-  private def handleInitialize(id: ujson.Value, params: ujson.Value): Unit =
+  private def handleInitialize(id: ujson.Value, params: ujson.Value): Unit = {
     val folders = params.obj.get("workspaceFolders")
-      .flatMap(v => if v.isNull then None else Some(v.arr.toList))
+      .flatMap(v => if (v.isNull) { None } else { Some(v.arr.toList) })
       .getOrElse(Nil)
 
     val compilerPrecise = params.obj.get("initializationOptions")
-      .flatMap(v => if v.isNull then None else v.obj.get("compilerPrecise"))
+      .flatMap(v => if (v.isNull) { None } else { v.obj.get("compilerPrecise") })
       .exists(_.bool)
 
-    provider = if compilerPrecise then CompilerProvider() else AstProvider()
+    provider = if (compilerPrecise) { CompilerProvider() } else { AstProvider() }
 
     log("unreal-scala-lsp")
     log("AI writes the code. You read it, navigate it, review it.")
-    if compilerPrecise then
+    if (compilerPrecise) {
       log("Mode: compiler-precise (presentation compiler)")
-    else
+    } else {
       log("Mode: AST-based (fast, no compiler)")
+    }
     log("")
     log("  go-to-definition  · find-references  · file watching")
     log("")
 
-    val workspaceRoots = if folders.nonEmpty then
+    val workspaceRoots = if (folders.nonEmpty) {
       folders.map(f => java.net.URI(f("uri").str).getPath)
-    else
-      params.obj.get("rootUri").flatMap(v => if v.isNull then None else Some(java.net.URI(v.str).getPath)).toList
+    } else {
+      params.obj.get("rootUri").flatMap(v => if (v.isNull) { None } else { Some(java.net.URI(v.str).getPath) }).toList
+    }
 
-    for path <- workspaceRoots do
+    for (path <- workspaceRoots) {
       log(s"indexing $path ...")
       val startTime = System.nanoTime()
       provider.indexWorkspace(java.io.File(path))
       val elapsed = (System.nanoTime() - startTime) / 1_000_000
       log(s"done in ${elapsed}ms — now tracking ${provider.uniqueSymbolNames} unique symbol names, collected across ${provider.indexedFiles} files")
+    }
 
     rpc.respond(id, ujson.Obj(
       "capabilities" -> ujson.Obj(
@@ -77,23 +84,26 @@ class LspServer(rpc: JsonRpc):
         "referencesProvider" -> true,
       )
     ))
+  }
 
-  private def handleDidOpen(params: ujson.Value): Unit =
+  private def handleDidOpen(params: ujson.Value): Unit = {
     val td = params("textDocument")
     val uri = td("uri").str
     val text = td("text").str
     log(s"didOpen: $uri (${text.length} chars)")
     provider.didOpen(uri, text)
     log(s"  now tracking ${provider.uniqueSymbolNames} unique symbol names, collected across ${provider.indexedFiles} files")
+  }
 
-  private def handleDidChange(params: ujson.Value): Unit =
+  private def handleDidChange(params: ujson.Value): Unit = {
     val uri = params("textDocument")("uri").str
     val changes = params("contentChanges").arr
     val text = changes.last("text").str
     log(s"didChange: $uri (${text.length} chars)")
     provider.didChange(uri, text)
+  }
 
-  private def handleDefinition(id: ujson.Value, params: ujson.Value): Unit =
+  private def handleDefinition(id: ujson.Value, params: ujson.Value): Unit = {
     val uri = params("textDocument")("uri").str
     val line = params("position")("line").num.toInt
     val col = params("position")("character").num.toInt
@@ -104,7 +114,7 @@ class LspServer(rpc: JsonRpc):
     val locations = provider.definition(uri, line, col)
     log(s"  found ${locations.size} locations")
 
-    val result = ujson.Arr.from(locations.map: loc =>
+    val result = ujson.Arr.from(locations.map { loc =>
       ujson.Obj(
         "uri" -> loc.uri,
         "range" -> ujson.Obj(
@@ -112,10 +122,11 @@ class LspServer(rpc: JsonRpc):
           "end" -> ujson.Obj("line" -> loc.endLine, "character" -> loc.endCol),
         )
       )
-    )
+    })
     rpc.respond(id, result)
+  }
 
-  private def handleReferences(id: ujson.Value, params: ujson.Value): Unit =
+  private def handleReferences(id: ujson.Value, params: ujson.Value): Unit = {
     val uri = params("textDocument")("uri").str
     val line = params("position")("line").num.toInt
     val col = params("position")("character").num.toInt
@@ -127,7 +138,7 @@ class LspServer(rpc: JsonRpc):
     val locations = provider.references(uri, line, col, includeDeclaration)
     log(s"  found ${locations.size} references")
 
-    val result = ujson.Arr.from(locations.map: loc =>
+    val result = ujson.Arr.from(locations.map { loc =>
       ujson.Obj(
         "uri" -> loc.uri,
         "range" -> ujson.Obj(
@@ -135,10 +146,11 @@ class LspServer(rpc: JsonRpc):
           "end" -> ujson.Obj("line" -> loc.endLine, "character" -> loc.endCol),
         )
       )
-    )
+    })
     rpc.respond(id, result)
+  }
 
-  private def handleInitialized(): Unit =
+  private def handleInitialized(): Unit = {
     log("initialized — registering file watchers")
     rpc.sendRequest("client/registerCapability", ujson.Obj(
       "registrations" -> ujson.Arr(
@@ -160,32 +172,40 @@ class LspServer(rpc: JsonRpc):
         )
       )
     ))
+  }
 
-  private def handleDidClose(params: ujson.Value): Unit =
+  private def handleDidClose(params: ujson.Value): Unit = {
     val uri = params("textDocument")("uri").str
     log(s"didClose: $uri")
     provider.didClose(uri)
+  }
 
-  private def handleDidChangeWatchedFiles(params: ujson.Value): Unit =
+  private def handleDidChangeWatchedFiles(params: ujson.Value): Unit = {
     val changes = params("changes").arr
     var reindexed = 0
     var removed = 0
     var skipped = 0
-    for change <- changes do
+    for (change <- changes) {
       val uri = change("uri").str
       val changeType = change("type").num.toInt
-      if provider.isOpen(uri) then
+      if (provider.isOpen(uri)) {
         skipped += 1
-      else
-        changeType match
+      } else {
+        changeType match {
           case 1 | 2 => // Created or Changed
             val path = java.net.URI(uri).getPath
             val file = java.io.File(path)
-            if file.exists() then
+            if (file.exists()) {
               provider.reindexFile(uri, file)
               reindexed += 1
+            }
           case 3 => // Deleted
             provider.removeFile(uri)
             removed += 1
           case _ => ()
+        }
+      }
+    }
     log(s"didChangeWatchedFiles: ${changes.size} events — reindexed $reindexed, removed $removed, skipped $skipped open — now tracking ${provider.uniqueSymbolNames} unique symbol names, collected across ${provider.indexedFiles} files")
+  }
+}
