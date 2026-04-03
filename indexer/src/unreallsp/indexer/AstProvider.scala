@@ -1,4 +1,6 @@
-package unreallsp
+package unreallsp.indexer
+
+import unreallsp.core.{LanguageProvider, SymbolLocation}
 
 class AstProvider extends LanguageProvider {
   private val indexer = Indexer()

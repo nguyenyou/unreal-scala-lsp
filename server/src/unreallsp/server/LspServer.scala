@@ -1,5 +1,8 @@
-package unreallsp
+package unreallsp.server
 
+import unreallsp.core.{LanguageProvider, log}
+import unreallsp.rpc.JsonRpc
+import unreallsp.indexer.{AstProvider, CompilerProvider}
 import ujson.*
 import scala.compiletime.uninitialized
 

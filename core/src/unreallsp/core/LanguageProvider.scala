@@ -1,6 +1,4 @@
-package unreallsp
-
-case class SymbolLocation(uri: String, line: Int, col: Int, endLine: Int, endCol: Int)
+package unreallsp.core
 
 trait LanguageProvider {
   def indexWorkspace(root: java.io.File): Unit

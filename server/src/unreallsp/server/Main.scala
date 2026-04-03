@@ -1,8 +1,7 @@
-package unreallsp
+package unreallsp.server
 
-private def log(msg: String): Unit = {
-  System.err.println(s"[unreal-scala-lsp] $msg")
-}
+import unreallsp.core.log
+import unreallsp.rpc.JsonRpc
 
 object Main {
   def main(args: Array[String]): Unit = {

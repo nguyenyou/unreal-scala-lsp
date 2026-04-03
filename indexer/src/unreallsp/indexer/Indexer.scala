@@ -1,5 +1,6 @@
-package unreallsp
+package unreallsp.indexer
 
+import unreallsp.core.SymbolLocation
 import scala.meta.*
 import scala.meta.tokens.Token
 import scala.collection.mutable

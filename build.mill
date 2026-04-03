@@ -3,16 +3,31 @@ package build
 import mill._
 import mill.scalalib._
 
-object server extends ScalaModule with NativeImageModule {
+trait UnrealModule extends ScalaModule {
   def scalaVersion = "3.8.2"
+}
+
+object core extends UnrealModule
+
+object rpc extends UnrealModule {
+  def mvnDeps = Seq(
+    mvn"com.lihaoyi::ujson:4.4.3",
+  )
+}
+
+object indexer extends UnrealModule {
+  def moduleDeps = Seq(core)
 
   def mvnDeps = Seq(
     mvn"org.scalameta::scalameta:4.15.2",
     mvn"com.github.javaparser:javaparser-core:3.28.0",
-    mvn"com.lihaoyi::ujson:4.4.3",
   )
+}
 
-  def mainClass = Some("unreallsp.Main")
+object server extends UnrealModule with NativeImageModule {
+  def moduleDeps = Seq(core, rpc, indexer)
+
+  def mainClass = Some("unreallsp.server.Main")
 
   def jvmVersion = Task { "graalvm-community:25" }
 

@@ -1,4 +1,4 @@
-package unreallsp
+package unreallsp.rpc
 
 import java.io.{InputStream, OutputStream}
 import java.util.concurrent.atomic.AtomicLong
