@@ -64,8 +64,12 @@ class CompilerProvider extends LanguageProvider {
           case Some(pc) => {
             try {
               debug(s"compiler-precise: calling pc.definition(offset=$offset)")
+              debug(s"  text around offset: ...${text.slice(math.max(0, offset - 20), math.min(text.length, offset + 20))}...")
               val result = pc.definition(params).get()
-              debug(s"compiler-precise: definition returned symbol=${result.symbol()}, ${result.locations().size()} locations")
+              debug(s"compiler-precise: definition returned symbol='${result.symbol()}', ${result.locations().size()} locations")
+              for (diag <- pc.diagnosticsForDebuggingPurposes().asScala) {
+                debug(s"  pc-diag: $diag")
+              }
               result.locations().asScala.toList.map(toSymbolLocation)
             } catch {
               case e: Exception => {
@@ -80,38 +84,9 @@ class CompilerProvider extends LanguageProvider {
     }
   }
 
-  def references(uri: String, line: Int, col: Int, includeDeclaration: Boolean): List[SymbolLocation] = {
-    fileContents.get(uri) match {
-      case None => Nil
-      case Some(text) => {
-        val offset = lineColToOffset(text, line, col)
-        val fileParams = SimpleVirtualFileParams(URI(uri), text)
-        val request = SimpleReferencesRequest(fileParams, includeDeclaration, offset)
-        compilerForUri(uri) match {
-          case None => {
-            debug(s"compiler-precise: no module found for $uri")
-            Nil
-          }
-          case Some(pc) => {
-            try {
-              debug(s"compiler-precise: calling pc.references(offset=$offset, includeDecl=$includeDeclaration)")
-              val results = pc.references(request).get()
-              debug(s"compiler-precise: references returned ${results.size()} result groups")
-              results.asScala.toList.flatMap { r =>
-                r.locations().asScala.map(toSymbolLocation)
-              }
-            } catch {
-              case e: Exception => {
-                log(s"compiler-precise: references error: ${e.getMessage}")
-                debug(s"  ${e.getStackTrace.take(5).mkString("\n  ")}")
-                Nil
-              }
-            }
-          }
-        }
-      }
-    }
-  }
+  // References not supported via PC (only finds within open files).
+  // HybridProvider delegates references to AstProvider instead.
+  def references(uri: String, line: Int, col: Int, includeDeclaration: Boolean): List[SymbolLocation] = Nil
 
   def wordAtPosition(uri: String, line: Int, col: Int): Option[String] = {
     fileContents.get(uri).flatMap { text =>

@@ -11,9 +11,8 @@ import scala.jdk.CollectionConverters.*
 import scala.collection.mutable
 import scala.meta.internal.semanticdb.Scala.*
 import scala.meta.internal.semanticdb.Scala.{Descriptor => d}
-import scala.meta.pc.{CancelToken, ContentType, OffsetParams, ParentSymbols, SymbolDocumentation, SymbolSearch, SymbolSearchVisitor, VirtualFileParams, ReferencesRequest, OutlineFiles}
+import scala.meta.pc.{CancelToken, ContentType, OffsetParams, ParentSymbols, SymbolDocumentation, SymbolSearch, SymbolSearchVisitor, VirtualFileParams, OutlineFiles}
 import org.eclipse.lsp4j.{Location, Position, Range}
-import org.eclipse.lsp4j.jsonrpc.messages.Either
 
 private[compiler] class SimpleVirtualFileParams(
   val _uri: URI,
@@ -33,16 +32,6 @@ private[compiler] class SimpleOffsetParams(
   def text(): String = _text
   def offset(): Int = _offset
   def token(): CancelToken = NoCancelToken
-}
-
-private[compiler] class SimpleReferencesRequest(
-  val _file: VirtualFileParams,
-  val _includeDefinition: Boolean,
-  val _offset: Int,
-) extends ReferencesRequest {
-  def file(): VirtualFileParams = _file
-  def includeDefinition(): Boolean = _includeDefinition
-  def offsetOrSymbol(): Either[Integer, String] = Either.forLeft(_offset)
 }
 
 private[compiler] object NoCancelToken extends CancelToken {

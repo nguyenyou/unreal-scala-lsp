@@ -3,7 +3,7 @@ package unreallsp.server
 import unreallsp.core.{LanguageProvider, log, debug, setDebug, isDebugEnabled}
 import unreallsp.rpc.JsonRpc
 import unreallsp.indexer.AstProvider
-import unreallsp.compiler.CompilerProvider
+import unreallsp.compiler.HybridProvider
 import ujson.*
 import scala.compiletime.uninitialized
 
@@ -77,12 +77,12 @@ class LspServer(rpc: JsonRpc) {
       log("debug logging enabled via initializationOptions")
     }
 
-    provider = if (compilerPrecise) { CompilerProvider() } else { AstProvider() }
+    provider = if (compilerPrecise) { HybridProvider() } else { AstProvider() }
 
     log("unreal-scala-lsp")
     log("AI writes the code. You read it, navigate it, review it.")
     if (compilerPrecise) {
-      log("Mode: compiler-precise (presentation compiler)")
+      log("Mode: hybrid (PC definition + AST references/fallback)")
     } else {
       log("Mode: AST-based (fast, no compiler)")
     }

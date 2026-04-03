@@ -25,7 +25,7 @@ object indexer extends UnrealModule {
 }
 
 object compiler extends UnrealModule {
-  def moduleDeps = Seq(core)
+  def moduleDeps = Seq(core, indexer)
 
   def mvnDeps = super.mvnDeps() ++ Seq(
     mvn"org.scala-lang::scala3-presentation-compiler:3.8.2",

@@ -55,7 +55,10 @@ object SourceLocator {
           case None => defaultLocation(path)
         }
       }
-      case _ => defaultLocation(path)
+      case _ => {
+        debug(s"  SourceLocator: scalameta parse failed, falling back to text search")
+        locateByText(path, source, target)
+      }
     }
   }
 
@@ -320,6 +323,37 @@ object SourceLocator {
         }
       }
       found
+    }
+  }
+
+  // ── Text-based fallback (when scalameta can't parse) ─────────────────
+
+  /** When scalameta can't parse the file (e.g. capture checking syntax),
+    * fall back to finding the declaration by text pattern.
+    * We already know the exact class and member name from the compiler. */
+  private def locateByText(path: Path, source: String, target: SymbolTarget): Location = {
+    val searchName = target.member.getOrElse(target.className)
+    val declKeywords = List("def ", "val ", "var ", "type ", "class ", "trait ", "object ", "enum ", "given ")
+    val lines = source.split("\n", -1)
+    var found: Option[(Int, Int, Int)] = None
+    var i = 0
+    while (i < lines.length && found.isEmpty) {
+      val line = lines(i)
+      val trimmed = line.trim
+      declKeywords.foreach { kw =>
+        if (found.isEmpty && trimmed.contains(kw + searchName)) {
+          val col = line.indexOf(kw + searchName) + kw.length
+          found = Some((i, col, col + searchName.length))
+          debug(s"  SourceLocator: text fallback found '$searchName' at $i:$col")
+        }
+      }
+      i += 1
+    }
+    found match {
+      case Some((line, col, endCol)) => {
+        new Location(path.toUri.toString, new Range(new Position(line, col), new Position(line, endCol)))
+      }
+      case None => defaultLocation(path)
     }
   }
 
