@@ -13,4 +13,5 @@ trait LanguageProvider {
   def wordAtPosition(uri: String, line: Int, col: Int): Option[String]
   def uniqueSymbolNames: Int
   def indexedFiles: Int
+  def shutdown(): Unit = ()
 }

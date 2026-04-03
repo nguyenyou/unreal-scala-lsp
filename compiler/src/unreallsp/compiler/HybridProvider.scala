@@ -64,4 +64,9 @@ class HybridProvider extends LanguageProvider {
   def uniqueSymbolNames: Int = ast.uniqueSymbolNames
 
   def indexedFiles: Int = ast.indexedFiles
+
+  override def shutdown(): Unit = {
+    ast.shutdown()
+    pc.shutdown()
+  }
 }

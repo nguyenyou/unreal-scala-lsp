@@ -27,6 +27,7 @@ class LspServer(rpc: JsonRpc) {
           case "initialized"             => handleInitialized()
           case "shutdown"                => {
             log("shutdown")
+            provider.shutdown()
             id.foreach(i => rpc.respond(i, ujson.Null))
             running = false
           }

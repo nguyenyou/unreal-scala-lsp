@@ -161,5 +161,15 @@ class CompilerProvider extends LanguageProvider {
     )
   }
 
+  override def shutdown(): Unit = {
+    log(s"compiler-precise: shutting down ${compilers.size} presentation compiler(s)")
+    compilers.values.foreach { pc =>
+      try { pc.shutdown() } catch { case _: Exception => () }
+    }
+    compilers.clear()
+    fileContents.clear()
+    openFiles.clear()
+  }
+
   private def isIdentChar(c: Char): Boolean = c.isLetterOrDigit || c == '_'
 }
