@@ -21,8 +21,6 @@ class Indexer:
   def markClosed(uri: String): Unit = openFiles -= uri
   def isOpen(uri: String): Boolean = openFiles.contains(uri)
 
-  case class SymbolLocation(uri: String, line: Int, col: Int, endLine: Int, endCol: Int)
-
   def uniqueSymbolNames: Int = definitions.size
   def indexedFiles: Int = fileSymbols.size
 

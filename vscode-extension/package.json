@@ -26,6 +26,11 @@
           "type": "string",
           "default": "",
           "description": "Path to the unreal-scala-lsp native binary or assembly jar"
+        },
+        "unrealScalaLsp.compilerPrecise": {
+          "type": "boolean",
+          "default": false,
+          "description": "Use compiler-precise mode with presentation compiler for full semantic analysis (experimental)"
         }
       }
     }

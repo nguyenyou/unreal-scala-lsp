@@ -25,11 +25,16 @@ export async function activate(context: vscode.ExtensionContext) {
     ? { command: "java", args: ["-jar", serverPath] }
     : { command: serverPath };
 
+  const compilerPrecise = config.get<boolean>("compilerPrecise", false);
+
   const clientOptions: LanguageClientOptions = {
     documentSelector: [
       { scheme: "file", language: "scala" },
       { scheme: "file", language: "java" },
     ],
+    initializationOptions: {
+      compilerPrecise,
+    },
   };
 
   client = new LanguageClient(

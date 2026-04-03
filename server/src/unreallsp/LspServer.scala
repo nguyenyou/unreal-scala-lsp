@@ -1,10 +1,11 @@
 package unreallsp
 
 import ujson.*
+import scala.compiletime.uninitialized
 
 /** LSP server that dispatches JSON-RPC methods to handlers. */
 class LspServer(rpc: JsonRpc):
-  private val indexer = Indexer()
+  private var provider: LanguageProvider = uninitialized
 
   def loop(): Unit =
     var running = true
@@ -41,9 +42,18 @@ class LspServer(rpc: JsonRpc):
       .flatMap(v => if v.isNull then None else Some(v.arr.toList))
       .getOrElse(Nil)
 
+    val compilerPrecise = params.obj.get("initializationOptions")
+      .flatMap(v => if v.isNull then None else v.obj.get("compilerPrecise"))
+      .exists(_.bool)
+
+    provider = if compilerPrecise then CompilerProvider() else AstProvider()
+
     log("unreal-scala-lsp")
     log("AI writes the code. You read it, navigate it, review it.")
-    log("No compiler. No build server. Just Cmd+click and go.")
+    if compilerPrecise then
+      log("Mode: compiler-precise (presentation compiler)")
+    else
+      log("Mode: AST-based (fast, no compiler)")
     log("")
     log("  go-to-definition  · find-references  · file watching")
     log("")
@@ -56,9 +66,9 @@ class LspServer(rpc: JsonRpc):
     for path <- workspaceRoots do
       log(s"indexing $path ...")
       val startTime = System.nanoTime()
-      indexer.indexDirectory(java.io.File(path))
+      provider.indexWorkspace(java.io.File(path))
       val elapsed = (System.nanoTime() - startTime) / 1_000_000
-      log(s"done in ${elapsed}ms — now tracking ${indexer.uniqueSymbolNames} unique symbol names, collected across ${indexer.indexedFiles} files")
+      log(s"done in ${elapsed}ms — now tracking ${provider.uniqueSymbolNames} unique symbol names, collected across ${provider.indexedFiles} files")
 
     rpc.respond(id, ujson.Obj(
       "capabilities" -> ujson.Obj(
@@ -73,26 +83,25 @@ class LspServer(rpc: JsonRpc):
     val uri = td("uri").str
     val text = td("text").str
     log(s"didOpen: $uri (${text.length} chars)")
-    indexer.markOpen(uri)
-    indexer.updateFile(uri, text)
-    log(s"  now tracking ${indexer.uniqueSymbolNames} unique symbol names, collected across ${indexer.indexedFiles} files")
+    provider.didOpen(uri, text)
+    log(s"  now tracking ${provider.uniqueSymbolNames} unique symbol names, collected across ${provider.indexedFiles} files")
 
   private def handleDidChange(params: ujson.Value): Unit =
     val uri = params("textDocument")("uri").str
     val changes = params("contentChanges").arr
     val text = changes.last("text").str
     log(s"didChange: $uri (${text.length} chars)")
-    indexer.updateFile(uri, text)
+    provider.didChange(uri, text)
 
   private def handleDefinition(id: ujson.Value, params: ujson.Value): Unit =
     val uri = params("textDocument")("uri").str
     val line = params("position")("line").num.toInt
     val col = params("position")("character").num.toInt
 
-    val word = indexer.wordAtPosition(uri, line, col)
+    val word = provider.wordAtPosition(uri, line, col)
     log(s"definition: $uri:$line:$col word=$word")
 
-    val locations = indexer.findDefinition(uri, line, col)
+    val locations = provider.definition(uri, line, col)
     log(s"  found ${locations.size} locations")
 
     val result = ujson.Arr.from(locations.map: loc =>
@@ -112,10 +121,10 @@ class LspServer(rpc: JsonRpc):
     val col = params("position")("character").num.toInt
     val includeDeclaration = params("context")("includeDeclaration").bool
 
-    val word = indexer.wordAtPosition(uri, line, col)
+    val word = provider.wordAtPosition(uri, line, col)
     log(s"references: $uri:$line:$col word=$word includeDeclaration=$includeDeclaration")
 
-    val locations = indexer.findReferences(uri, line, col, includeDeclaration)
+    val locations = provider.references(uri, line, col, includeDeclaration)
     log(s"  found ${locations.size} references")
 
     val result = ujson.Arr.from(locations.map: loc =>
@@ -155,7 +164,7 @@ class LspServer(rpc: JsonRpc):
   private def handleDidClose(params: ujson.Value): Unit =
     val uri = params("textDocument")("uri").str
     log(s"didClose: $uri")
-    indexer.markClosed(uri)
+    provider.didClose(uri)
 
   private def handleDidChangeWatchedFiles(params: ujson.Value): Unit =
     val changes = params("changes").arr
@@ -165,7 +174,7 @@ class LspServer(rpc: JsonRpc):
     for change <- changes do
       val uri = change("uri").str
       val changeType = change("type").num.toInt
-      if indexer.isOpen(uri) then
+      if provider.isOpen(uri) then
         skipped += 1
       else
         changeType match
@@ -173,10 +182,10 @@ class LspServer(rpc: JsonRpc):
             val path = java.net.URI(uri).getPath
             val file = java.io.File(path)
             if file.exists() then
-              indexer.reindexFile(uri, file)
+              provider.reindexFile(uri, file)
               reindexed += 1
           case 3 => // Deleted
-            indexer.removeFile(uri)
+            provider.removeFile(uri)
             removed += 1
           case _ => ()
-    log(s"didChangeWatchedFiles: ${changes.size} events — reindexed $reindexed, removed $removed, skipped $skipped open — now tracking ${indexer.uniqueSymbolNames} unique symbol names, collected across ${indexer.indexedFiles} files")
+    log(s"didChangeWatchedFiles: ${changes.size} events — reindexed $reindexed, removed $removed, skipped $skipped open — now tracking ${provider.uniqueSymbolNames} unique symbol names, collected across ${provider.indexedFiles} files")
