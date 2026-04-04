@@ -40,7 +40,7 @@ export async function activate(context: vscode.ExtensionContext) {
     ? { command: "java", args }
     : { command: serverPath, args: debug ? ["--debug"] : [] };
 
-  const usePresentationCompiler = config.get<boolean>("usePresentationCompiler", false);
+  const usePresentationCompiler = config.get<boolean>("usePresentationCompiler", true);
 
   const clientOptions: LanguageClientOptions = {
     documentSelector: [
