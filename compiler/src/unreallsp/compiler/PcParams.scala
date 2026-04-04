@@ -145,8 +145,11 @@ private[compiler] class WorkspaceSymbolSearch(
   private def findByPackageDecl(target: SymbolTarget): Option[Location] = {
     val packageName = target.parts.init.mkString(".")
     val declKeywords = List("class ", "object ", "trait ", "enum ")
-    allModules.iterator
-      .flatMap(m => m.sourceRoots.iterator.map(Path.of(_)))
+    val allRoots = allModules.flatMap(_.sourceRoots).distinct.map(Path.of(_))
+    // Prefer real source roots over generated/copied sources in out/
+    val (realRoots, outRoots) = allRoots.partition(r => !r.toString.contains("/out/"))
+    val orderedRoots = realRoots ++ outRoots
+    orderedRoots.iterator
       .filter(Files.isDirectory(_))
       .flatMap(findScalaFiles)
       .collectFirst {
