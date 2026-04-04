@@ -34,17 +34,8 @@ object compiler extends UnrealModule {
   )
 }
 
-object server extends UnrealModule with NativeImageModule {
+object server extends UnrealModule {
   def moduleDeps = Seq(core, rpc, indexer, compiler)
 
   def mainClass = Some("unreallsp.server.Main")
-
-  def jvmVersion = Task { "graalvm-community:25" }
-
-  def nativeImageOptions = Task {
-    super.nativeImageOptions() ++ Seq(
-      "--no-fallback",
-      "-H:+ReportExceptionStackTraces",
-    )
-  }
 }

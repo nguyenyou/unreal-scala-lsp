@@ -11,6 +11,7 @@ import {
 
 const VERSION = "1.3.0";
 const REPO = "nguyenyou/unreal-scala-lsp";
+const JAR_NAME = "unreal-scala-lsp.jar";
 
 let client: LanguageClient | undefined;
 let outputChannel: vscode.OutputChannel | undefined;
@@ -21,20 +22,21 @@ export async function activate(context: vscode.ExtensionContext) {
   const manualPath = config.get<string>("serverPath", "");
   const debug = config.get<boolean>("debug", false);
 
-  const serverPath = manualPath || (await ensureBinary(context));
+  const serverPath = manualPath || (await ensureJar(context));
   if (!serverPath) return;
 
   outputChannel = vscode.window.createOutputChannel("Unreal Scala LSP");
 
+  const isJar = serverPath.endsWith(".jar");
   const args: string[] = [];
-  if (serverPath.endsWith(".jar")) {
+  if (isJar) {
     args.push("-jar", serverPath);
   }
   if (debug) {
     args.push("--debug");
   }
 
-  const serverOptions: ServerOptions = serverPath.endsWith(".jar")
+  const serverOptions: ServerOptions = isJar
     ? { command: "java", args }
     : { command: serverPath, args: debug ? ["--debug"] : [] };
 
@@ -69,38 +71,17 @@ export function deactivate(): Thenable<void> | undefined {
   return client?.stop();
 }
 
-function getPlatformArtifact(): string | undefined {
-  const platform = process.platform;
-  const arch = process.arch;
-
-  if (platform === "darwin" && arch === "arm64")
-    return "unreal-scala-lsp-darwin-arm64";
-  if (platform === "darwin" && arch === "x64")
-    return "unreal-scala-lsp-darwin-x64";
-  if (platform === "linux" && arch === "x64")
-    return "unreal-scala-lsp-linux-x64";
-  return undefined;
-}
-
-async function ensureBinary(
+async function ensureJar(
   context: vscode.ExtensionContext
 ): Promise<string | undefined> {
-  const artifact = getPlatformArtifact();
-  if (!artifact) {
-    vscode.window.showErrorMessage(
-      `unreal-scala-lsp: Unsupported platform ${process.platform}-${process.arch}. Set 'unrealScalaLsp.serverPath' manually.`
-    );
-    return undefined;
-  }
-
   const binDir = path.join(context.globalStorageUri.fsPath, "bin");
-  const binaryPath = path.join(binDir, `${VERSION}-${artifact}`);
+  const jarPath = path.join(binDir, `${VERSION}-${JAR_NAME}`);
 
-  if (fs.existsSync(binaryPath)) {
-    return binaryPath;
+  if (fs.existsSync(jarPath)) {
+    return jarPath;
   }
 
-  const url = `https://github.com/${REPO}/releases/download/v${VERSION}/${artifact}`;
+  const url = `https://github.com/${REPO}/releases/download/v${VERSION}/${JAR_NAME}`;
 
   return vscode.window.withProgress(
     {
@@ -110,12 +91,11 @@ async function ensureBinary(
     async () => {
       try {
         fs.mkdirSync(binDir, { recursive: true });
-        await download(url, binaryPath);
-        fs.chmodSync(binaryPath, 0o755);
+        await download(url, jarPath);
         vscode.window.showInformationMessage(
           `Unreal Scala LSP v${VERSION} installed.`
         );
-        return binaryPath;
+        return jarPath;
       } catch (e) {
         vscode.window.showErrorMessage(`Failed to download: ${e}`);
         return undefined;
