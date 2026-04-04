@@ -1,6 +1,6 @@
 package unreallsp.compiler
 
-import unreallsp.core.{LanguageProvider, MillModule, MillWorkspace, SymbolLocation, log, debug}
+import unreallsp.core.{LanguageProvider, MillModule, MillRepo, MillWorkspace, SymbolLocation, log, debug}
 import java.net.URI
 import java.nio.file.{Files, Path}
 import scala.compiletime.uninitialized
@@ -11,6 +11,7 @@ import org.eclipse.lsp4j.Location
 
 class CompilerProvider extends LanguageProvider {
   private var allModules: List[MillModule] = Nil
+  private var allRepos: List[MillRepo] = Nil
   private var workspaceRoot: java.io.File = uninitialized
   private val compilers = mutable.Map.empty[String, ScalaPresentationCompiler]
   private val fileContents = mutable.Map.empty[String, String]
@@ -19,9 +20,13 @@ class CompilerProvider extends LanguageProvider {
   def indexWorkspace(root: java.io.File): Unit = {
     workspaceRoot = root
     allModules = MillWorkspace.discover(root)
-    log(s"compiler-precise: discovered ${allModules.size} Mill modules")
+    allRepos = MillWorkspace.discoverRepos(root)
+    log(s"compiler-precise: discovered ${allModules.size} Mill modules, ${allRepos.size} custom repos")
     for (m <- allModules) {
       log(s"  ${m.name}: ${m.classpath.size} classpath entries, scala ${m.scalaVersion}")
+    }
+    for (r <- allRepos) {
+      log(s"  repo: ${r.url} (auth=${r.user.isDefined})")
     }
   }
 
@@ -131,7 +136,7 @@ class CompilerProvider extends LanguageProvider {
     debug(s"  scalacOptions: ${mod.scalacOptions}")
     val cp = mod.classpath.map(p => Path.of(p))
     val sourceCacheDir = workspaceRoot.toPath.resolve(".scalex").resolve("readonly")
-    val search = WorkspaceSymbolSearch(allModules, sourceCacheDir)
+    val search = WorkspaceSymbolSearch(allModules, cacheDir = sourceCacheDir, repos = allRepos)
     ScalaPresentationCompiler(
       buildTargetIdentifier = mod.name,
       classpath = cp,

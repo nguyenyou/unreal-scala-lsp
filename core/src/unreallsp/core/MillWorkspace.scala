@@ -2,6 +2,15 @@ package unreallsp.core
 
 import java.io.File
 import java.nio.file.{Files, Path}
+import scala.util.matching.Regex
+
+/** A Maven repository with optional credentials, extracted from mill-build/build.mill. */
+case class MillRepo(
+  url: String,
+  user: Option[String],
+  password: Option[String],
+  realm: Option[String],
+)
 
 /** A discovered Mill module with its compilation metadata. */
 case class MillModule(
@@ -125,6 +134,96 @@ object MillWorkspace {
         json.obj.get("value")
       } catch {
         case _: Exception => None
+      }
+    }
+  }
+
+  /** Discover Maven repositories with credentials from mill-build/build.mill.
+    * Parses the Scala source to extract MavenRepository URLs and Authentication params. */
+  def discoverRepos(workspaceRoot: File): List[MillRepo] = {
+    val buildFile = File(workspaceRoot, "mill-build/build.mill")
+    if (!buildFile.isFile) {
+      Nil
+    } else {
+      try {
+        val content = Files.readString(buildFile.toPath)
+        parseMavenRepos(content)
+      } catch {
+        case _: Exception => Nil
+      }
+    }
+  }
+
+  // Regex patterns for extracting MavenRepository blocks from Scala source.
+  // Matches: MavenRepository("url", authentication = Some(Authentication(...)))
+  // and plain: MavenRepository("url")
+  private val mavenRepoBlock: Regex =
+    """(?s)MavenRepository\(\s*"([^"]+)"(.*?)\)(?:\s*[,\)])""".r
+
+  private val userPattern: Regex = """user\s*=\s*"([^"]+)"""".r
+  private val passwordPattern: Regex = """password\s*=\s*"([^"]+)"""".r
+  private val realmPattern: Regex = """realmOpt\s*=\s*(?:Some|Option)\(\s*"([^"]+)"\s*\)""".r
+
+  private def parseMavenRepos(content: String): List[MillRepo] = {
+    // Find all MavenRepository(...) blocks
+    val repos = List.newBuilder[MillRepo]
+    // Use a more robust approach: find each MavenRepository( and match its balanced parens
+    var idx = 0
+    while (idx < content.length) {
+      val start = content.indexOf("MavenRepository(", idx)
+      if (start < 0) {
+        idx = content.length
+      } else {
+        val parenStart = start + "MavenRepository".length
+        extractBalancedParens(content, parenStart) match {
+          case Some(block) => {
+            // block is the content inside MavenRepository(...)
+            // Extract the URL (first string literal)
+            val urlPattern = """"([^"]+)"""".r
+            val url = urlPattern.findFirstMatchIn(block).map(_.group(1))
+            url.foreach { u =>
+              val user = userPattern.findFirstMatchIn(block).map(_.group(1))
+              val password = passwordPattern.findFirstMatchIn(block).map(_.group(1))
+              val realm = realmPattern.findFirstMatchIn(block).map(_.group(1))
+              repos += MillRepo(u, user, password, realm)
+            }
+            idx = parenStart + block.length + 2 // skip past closing paren
+          }
+          case None => {
+            idx = parenStart + 1
+          }
+        }
+      }
+    }
+    repos.result()
+  }
+
+  /** Extract content inside balanced parentheses starting at the given index.
+    * Returns the content between ( and ) exclusive. */
+  private def extractBalancedParens(s: String, openIdx: Int): Option[String] = {
+    if (openIdx >= s.length || s.charAt(openIdx) != '(') {
+      None
+    } else {
+      var depth = 1
+      var i = openIdx + 1
+      while (i < s.length && depth > 0) {
+        val c = s.charAt(i)
+        if (c == '(') { depth += 1 }
+        else if (c == ')') { depth -= 1 }
+        else if (c == '"') {
+          // Skip string literals to avoid counting parens inside strings
+          i += 1
+          while (i < s.length && s.charAt(i) != '"') {
+            if (s.charAt(i) == '\\') { i += 1 } // skip escaped chars
+            i += 1
+          }
+        }
+        i += 1
+      }
+      if (depth == 0) {
+        Some(s.substring(openIdx + 1, i - 1))
+      } else {
+        None
       }
     }
   }

@@ -1,6 +1,6 @@
 package unreallsp.compiler
 
-import unreallsp.core.{MillModule, debug}
+import unreallsp.core.{MillModule, MillRepo, debug}
 import java.io.File
 import java.net.URI
 import java.nio.file.{Files, Path}
@@ -64,25 +64,38 @@ private[compiler] case class SymbolTarget(
 private[compiler] class WorkspaceSymbolSearch(
   allModules: List[MillModule],
   cacheDir: Path,
+  repos: List[MillRepo] = Nil,
 ) extends SymbolSearch {
 
   private val sourceJarCache = mutable.Map.empty[String, Option[Path]]
+  private val definitionCache = mutable.Map.empty[String, Location]
 
   override def definition(symbol: String, source: URI): java.util.List[Location] = {
     debug(s"WorkspaceSymbolSearch.definition($symbol)")
-    val topLevel = extractTopLevel(symbol)
-    if (topLevel.isEmpty) {
-      java.util.Collections.emptyList()
-    } else {
-      val target = SymbolTarget(topLevel, extractMember(symbol))
-      val loc = findInWorkspace(target)
-        .orElse(findInSourceJars(symbol, target))
-        .orElse(findInJdkSources(target))
-      loc match {
-        case Some(l) => java.util.Collections.singletonList(l)
-        case None => {
-          debug(s"  not found for $symbol")
+    definitionCache.get(symbol) match {
+      case Some(cached) => {
+        debug(s"  cache hit: ${cached.getUri}:${cached.getRange.getStart.getLine}")
+        java.util.Collections.singletonList(cached)
+      }
+      case None => {
+        val topLevel = extractTopLevel(symbol)
+        if (topLevel.isEmpty) {
           java.util.Collections.emptyList()
+        } else {
+          val target = SymbolTarget(topLevel, extractMember(symbol))
+          val loc = findInWorkspace(target)
+            .orElse(findInSourceJars(symbol, target))
+            .orElse(findInJdkSources(target))
+          loc match {
+            case Some(l) => {
+              definitionCache(symbol) = l
+              java.util.Collections.singletonList(l)
+            }
+            case None => {
+              debug(s"  not found for $symbol")
+              java.util.Collections.emptyList()
+            }
+          }
         }
       }
     }
@@ -230,41 +243,64 @@ private[compiler] class WorkspaceSymbolSearch(
     })
   }
 
-  /** Extract Maven coordinates from a Coursier cache path and fetch the sources JAR.
-    * Path pattern: .../maven2/group/artifact/version/artifact-version.jar */
+  /** Extract Maven coordinates from a JAR and fetch the sources JAR.
+    * Tries pom.properties inside the JAR first (works for any cache layout),
+    * then falls back to parsing the Coursier cache path. */
   private def fetchSourceJar(jarPath: Path): Option[Path] = {
     try {
-      val abs = jarPath.toAbsolutePath.toString
-      // Find the maven2/ prefix to extract coordinates
-      val mavenIdx = abs.indexOf("/maven2/")
-      if (mavenIdx < 0) {
-        None
-      } else {
-        val afterMaven = abs.substring(mavenIdx + "/maven2/".length)
-        val parts = afterMaven.split("/")
-        // parts: [group, ..., group, artifact, version, filename.jar]
-        if (parts.length < 3) {
+      extractMavenCoord(jarPath) match {
+        case None => {
+          debug(s"  could not extract Maven coordinates from $jarPath")
           None
-        } else {
-          val version = parts(parts.length - 2)
-          val artifact = parts(parts.length - 3)
-          val group = parts.take(parts.length - 3).mkString(".")
-          val coord = s"$group:$artifact:$version"
+        }
+        case Some(coord) => {
           debug(s"  fetching sources jar for $coord")
-          val pb = new ProcessBuilder("coursier", "fetch", "--sources", coord)
-          pb.redirectErrorStream(true)
+          val cmd = java.util.ArrayList[String]()
+          cmd.add("coursier")
+          cmd.add("fetch")
+          cmd.add("--sources")
+          cmd.add(coord)
+          for (repo <- repos) {
+            cmd.add("--repository")
+            cmd.add(repo.url)
+            for (user <- repo.user; pass <- repo.password) {
+              val cred = repo.realm match {
+                case Some(r) => s"${extractHost(repo.url)}($r) $user:$pass"
+                case None => s"${extractHost(repo.url)} $user:$pass"
+              }
+              cmd.add("--credentials")
+              cmd.add(cred)
+            }
+          }
+          debug(s"  coursier cmd: ${cmd}")
+          val pb = new ProcessBuilder(cmd)
+          pb.redirectErrorStream(false)
           val proc = pb.start()
-          val output = new String(proc.getInputStream.readAllBytes()).trim
+          // Read stderr in a separate thread to avoid blocking
+          val stderrThread = new Thread(new Runnable {
+            def run(): Unit = {
+              try { proc.getErrorStream.readAllBytes() } catch { case _: Exception => () }
+            }
+          })
+          stderrThread.setDaemon(true)
+          stderrThread.start()
+          val stdout = new String(proc.getInputStream.readAllBytes()).trim
           val exitCode = proc.waitFor()
+          debug(s"  coursier exit=$exitCode, stdout lines=${stdout.split("\n").length}")
+          debug(s"  coursier stdout: $stdout")
           if (exitCode == 0) {
-            val sourcePaths = output.split("\n").filter(_.endsWith("-sources.jar"))
+            // Only accept lines that are absolute file paths ending with -sources.jar
+            val sourcePaths = stdout.split("\n")
+              .map(_.trim)
+              .filter(l => l.startsWith("/") && l.endsWith("-sources.jar"))
+            debug(s"  source jar candidates: ${sourcePaths.mkString(", ")}")
             sourcePaths.headOption.map { sp =>
               val srcPath = Path.of(sp)
               debug(s"  fetched source jar: $srcPath")
               srcPath
             }
           } else {
-            debug(s"  coursier fetch failed (exit $exitCode)")
+            debug(s"  coursier fetch failed (exit $exitCode): $stdout")
             None
           }
         }
@@ -274,6 +310,84 @@ private[compiler] class WorkspaceSymbolSearch(
         debug(s"  fetchSourceJar error: ${e.getMessage}")
         None
       }
+    }
+  }
+
+  /** Extract Maven coordinates (group:artifact:version) from a JAR file.
+    * Strategy 1: read META-INF/maven/ * / * /pom.properties inside the JAR.
+    * Strategy 2: parse the Coursier cache path (.../maven2/group/art/ver/file.jar). */
+  private def extractMavenCoord(jarPath: Path): Option[String] = {
+    // Strategy 1: pom.properties inside the jar
+    try {
+      val jar = new JarFile(jarPath.toFile)
+      try {
+        val entries = jar.entries()
+        var coord: Option[String] = None
+        while (entries.hasMoreElements && coord.isEmpty) {
+          val e = entries.nextElement()
+          if (e.getName.startsWith("META-INF/maven/") && e.getName.endsWith("/pom.properties")) {
+            val props = new java.util.Properties()
+            props.load(jar.getInputStream(e))
+            val g = props.getProperty("groupId")
+            val a = props.getProperty("artifactId")
+            val v = props.getProperty("version")
+            if (g != null && a != null && v != null) {
+              coord = Some(s"$g:$a:$v")
+            }
+          }
+        }
+        if (coord.isDefined) {
+          debug(s"  extracted coords from pom.properties: ${coord.get}")
+        }
+        coord
+      } finally {
+        jar.close()
+      }
+    } catch {
+      case _: Exception => None
+    }
+  }.orElse {
+    // Strategy 2: parse the Coursier cache path
+    val abs = jarPath.toAbsolutePath.toString
+    // Try /maven2/ prefix (Maven Central, Sonatype, etc.)
+    findMavenCoordsAfterPrefix(abs, "/maven2/")
+      // Try /artifactory/<repo-name>/ prefix (Artifactory)
+      .orElse {
+        val artIdx = abs.indexOf("/artifactory/")
+        if (artIdx < 0) {
+          None
+        } else {
+          val afterArt = abs.substring(artIdx + "/artifactory/".length)
+          val slashIdx = afterArt.indexOf('/')
+          if (slashIdx < 0) {
+            None
+          } else {
+            // Skip the repo name, rest is group/artifact/version/file.jar
+            findMavenCoordsFromSuffix(afterArt.substring(slashIdx + 1))
+          }
+        }
+      }
+  }
+
+  private def findMavenCoordsAfterPrefix(abs: String, prefix: String): Option[String] = {
+    val idx = abs.indexOf(prefix)
+    if (idx < 0) {
+      None
+    } else {
+      findMavenCoordsFromSuffix(abs.substring(idx + prefix.length))
+    }
+  }
+
+  /** Extract group:artifact:version from a path like group/subgroup/artifact/version/file.jar */
+  private def findMavenCoordsFromSuffix(suffix: String): Option[String] = {
+    val parts = suffix.split("/")
+    if (parts.length < 4) {
+      None
+    } else {
+      val version = parts(parts.length - 2)
+      val artifact = parts(parts.length - 3)
+      val group = parts.take(parts.length - 3).mkString(".")
+      Some(s"$group:$artifact:$version")
     }
   }
 
@@ -436,6 +550,15 @@ private[compiler] class WorkspaceSymbolSearch(
 
   private def locateInFile(path: Path, target: SymbolTarget): Location = {
     SourceLocator.locate(path, target)
+  }
+
+  /** Extract hostname from a URL for coursier credential matching. */
+  private def extractHost(url: String): String = {
+    try {
+      URI(url).getHost
+    } catch {
+      case _: Exception => url
+    }
   }
 
   private def findScalaFiles(dir: Path): List[Path] = {

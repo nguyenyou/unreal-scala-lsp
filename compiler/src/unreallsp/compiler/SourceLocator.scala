@@ -124,6 +124,18 @@ object SourceLocator {
           case d: Defn.Enum if d.name.value == className => {
             inTarget = true; d.children.foreach(walk); inTarget = false
           }
+          case d: Defn.Class if inTarget && d.name.value == memberName => {
+            result = Some(d.name.pos)
+          }
+          case d: Defn.Trait if inTarget && d.name.value == memberName => {
+            result = Some(d.name.pos)
+          }
+          case d: Defn.Object if inTarget && d.name.value == memberName => {
+            result = Some(d.name.pos)
+          }
+          case d: Defn.Enum if inTarget && d.name.value == memberName => {
+            result = Some(d.name.pos)
+          }
           case d: Defn.Def if inTarget && d.name.value == memberName => {
             result = Some(d.name.pos)
           }
