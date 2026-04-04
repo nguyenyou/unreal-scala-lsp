@@ -276,32 +276,38 @@ private[compiler] class WorkspaceSymbolSearch(
           val pb = new ProcessBuilder(cmd)
           pb.redirectErrorStream(false)
           val proc = pb.start()
-          // Read stderr in a separate thread to avoid blocking
-          val stderrThread = new Thread(new Runnable {
-            def run(): Unit = {
-              try { proc.getErrorStream.readAllBytes() } catch { case _: Exception => () }
+          try {
+            // Read stderr in a separate thread to avoid blocking
+            val stderrThread = new Thread(new Runnable {
+              def run(): Unit = {
+                try { proc.getErrorStream.readAllBytes() } catch { case _: Exception => () }
+              }
+            })
+            stderrThread.setDaemon(true)
+            stderrThread.start()
+            val stdout = new String(proc.getInputStream.readAllBytes()).trim
+            val exitCode = proc.waitFor()
+            debug(s"  coursier exit=$exitCode, stdout lines=${stdout.split("\n").length}")
+            if (exitCode == 0) {
+              // Only accept lines that are absolute file paths ending with -sources.jar
+              val sourcePaths = stdout.split("\n")
+                .map(_.trim)
+                .filter(l => l.startsWith("/") && l.endsWith("-sources.jar"))
+              sourcePaths.headOption.map { sp =>
+                val srcPath = Path.of(sp)
+                debug(s"  fetched source jar: $srcPath")
+                srcPath
+              }
+            } else {
+              debug(s"  coursier fetch failed (exit $exitCode): $stdout")
+              None
             }
-          })
-          stderrThread.setDaemon(true)
-          stderrThread.start()
-          val stdout = new String(proc.getInputStream.readAllBytes()).trim
-          val exitCode = proc.waitFor()
-          debug(s"  coursier exit=$exitCode, stdout lines=${stdout.split("\n").length}")
-          debug(s"  coursier stdout: $stdout")
-          if (exitCode == 0) {
-            // Only accept lines that are absolute file paths ending with -sources.jar
-            val sourcePaths = stdout.split("\n")
-              .map(_.trim)
-              .filter(l => l.startsWith("/") && l.endsWith("-sources.jar"))
-            debug(s"  source jar candidates: ${sourcePaths.mkString(", ")}")
-            sourcePaths.headOption.map { sp =>
-              val srcPath = Path.of(sp)
-              debug(s"  fetched source jar: $srcPath")
-              srcPath
+          } catch {
+            case e: Exception => {
+              proc.destroyForcibly()
+              debug(s"  coursier process error: ${e.getMessage}")
+              None
             }
-          } else {
-            debug(s"  coursier fetch failed (exit $exitCode): $stdout")
-            None
           }
         }
       }
@@ -327,7 +333,8 @@ private[compiler] class WorkspaceSymbolSearch(
           val e = entries.nextElement()
           if (e.getName.startsWith("META-INF/maven/") && e.getName.endsWith("/pom.properties")) {
             val props = new java.util.Properties()
-            props.load(jar.getInputStream(e))
+            val is = jar.getInputStream(e)
+            try { props.load(is) } finally { is.close() }
             val g = props.getProperty("groupId")
             val a = props.getProperty("artifactId")
             val v = props.getProperty("version")
