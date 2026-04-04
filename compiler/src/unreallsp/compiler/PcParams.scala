@@ -266,22 +266,30 @@ private[compiler] class WorkspaceSymbolSearch(
             cmd.add(repo.url)
           }
           // Pass credentials via temp file to avoid exposure in ps/proc (CWE-214)
+          // Uses Coursier's properties format: repoN.host/username/password/realm
           val credFile = {
-            val creds = repos.flatMap { repo =>
-              for (user <- repo.user; pass <- repo.password) yield {
-                repo.realm match {
-                  case Some(r) => s"${extractHost(repo.url)}($r) $user:$pass"
-                  case None => s"${extractHost(repo.url)} $user:$pass"
+            val lines = List.newBuilder[String]
+            repos.zipWithIndex.foreach { case (repo, idx) =>
+              (repo.user, repo.password) match {
+                case (Some(user), Some(pass)) => {
+                  val host = extractHost(repo.url)
+                  lines += s"repo$idx.host=$host"
+                  lines += s"repo$idx.username=$user"
+                  lines += s"repo$idx.password=$pass"
+                  repo.realm.foreach(r => lines += s"repo$idx.realm=$r")
+                  lines += s"repo$idx.auto=true"
                 }
+                case _ => ()
               }
             }
-            if (creds.nonEmpty) {
+            val credLines = lines.result()
+            if (credLines.nonEmpty) {
               val tmpFile = Files.createTempFile("coursier-creds-", ".properties")
               tmpFile.toFile.setReadable(false, false)
               tmpFile.toFile.setReadable(true, true)
               tmpFile.toFile.setWritable(false, false)
               tmpFile.toFile.setWritable(true, true)
-              Files.writeString(tmpFile, creds.mkString("\n"))
+              Files.writeString(tmpFile, credLines.mkString("\n"))
               cmd.add("--credential-file")
               cmd.add(tmpFile.toAbsolutePath.toString)
               Some(tmpFile)
