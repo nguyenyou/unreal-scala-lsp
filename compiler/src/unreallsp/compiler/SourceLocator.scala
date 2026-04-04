@@ -234,29 +234,36 @@ object SourceLocator {
         java.util.List.of(fileObject),
       ).asInstanceOf[JavacTask]
 
-      val compilationUnits = task.parse().asScala.toList
-      compilationUnits.headOption match {
-        case None => defaultLoc
-        case Some(cu) => {
-          val trees = Trees.instance(task)
-          val sourcePositions = trees.getSourcePositions()
-          val lineMap = cu.getLineMap()
+      try {
+        val compilationUnits = task.parse().asScala.toList
+        compilationUnits.headOption match {
+          case None => defaultLoc
+          case Some(cu) => {
+            val trees = Trees.instance(task)
+            val sourcePositions = trees.getSourcePositions()
+            val lineMap = cu.getLineMap()
 
-          val pos = target.member match {
-            case Some(memberName) => {
-              findJavaMember(cu, sourcePositions, lineMap, target.className, memberName)
-                .orElse(findJavaDecl(cu, sourcePositions, lineMap, target.className))
+            val pos = target.member match {
+              case Some(memberName) => {
+                findJavaMember(cu, sourcePositions, lineMap, target.className, memberName)
+                  .orElse(findJavaDecl(cu, sourcePositions, lineMap, target.className))
+              }
+              case None => findJavaDecl(cu, sourcePositions, lineMap, target.className)
             }
-            case None => findJavaDecl(cu, sourcePositions, lineMap, target.className)
-          }
-          pos match {
-            case Some((line, col, endCol)) => {
-              val start = new Position(line, col)
-              val end = new Position(line, endCol)
-              new Location(uri, new Range(start, end))
+            pos match {
+              case Some((line, col, endCol)) => {
+                val start = new Position(line, col)
+                val end = new Position(line, endCol)
+                new Location(uri, new Range(start, end))
+              }
+              case None => defaultLoc
             }
-            case None => defaultLoc
           }
+        }
+      } finally {
+        task match {
+          case closeable: java.io.Closeable => try { closeable.close() } catch { case _: Exception => () }
+          case _ => ()
         }
       }
     }

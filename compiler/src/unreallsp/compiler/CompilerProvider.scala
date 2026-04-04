@@ -26,7 +26,7 @@ class CompilerProvider extends LanguageProvider {
       log(s"  ${m.name}: ${m.classpath.size} classpath entries, scala ${m.scalaVersion}")
     }
     for (r <- allRepos) {
-      log(s"  repo: ${r.url} (auth=${r.user.isDefined})")
+      debug(s"  repo: ${r.url} (auth=${r.user.isDefined})")
     }
   }
 

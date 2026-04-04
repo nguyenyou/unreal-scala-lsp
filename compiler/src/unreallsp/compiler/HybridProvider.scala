@@ -66,7 +66,6 @@ class HybridProvider extends LanguageProvider {
   def indexedFiles: Int = ast.indexedFiles
 
   override def shutdown(): Unit = {
-    ast.shutdown()
-    pc.shutdown()
+    try { ast.shutdown() } finally { pc.shutdown() }
   }
 }

@@ -13,7 +13,7 @@ class LspServer(rpc: JsonRpc) {
 
   def loop(): Unit = {
     var running = true
-    while (running) {
+    try { while (running) {
       try {
         val msg = rpc.read()
         val method = msg.obj.get("method").map(_.str).getOrElse("")
@@ -53,6 +53,11 @@ class LspServer(rpc: JsonRpc) {
         case e: Exception =>
           log(s"error: ${e.getMessage}")
           debug(s"  stacktrace: ${e.getStackTrace.take(10).mkString("\n    ")}")
+      }
+    }
+    } finally {
+      if (provider != null) {
+        try { provider.shutdown() } catch { case _: Exception => () }
       }
     }
   }

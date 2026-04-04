@@ -187,7 +187,8 @@ private[compiler] class WorkspaceSymbolSearch(
         if (entry == null) {
           None
         } else {
-          val bytes = jar.getInputStream(entry).readAllBytes()
+          val is = jar.getInputStream(entry)
+          val bytes = try { is.readAllBytes() } finally { is.close() }
           val sourceFileName = readSourceFileAttribute(bytes)
           sourceFileName.flatMap { srcFile =>
             debug(s"  classfile $classfilePath -> SourceFile: $srcFile")
@@ -263,51 +264,72 @@ private[compiler] class WorkspaceSymbolSearch(
           for (repo <- repos) {
             cmd.add("--repository")
             cmd.add(repo.url)
-            for (user <- repo.user; pass <- repo.password) {
-              val cred = repo.realm match {
-                case Some(r) => s"${extractHost(repo.url)}($r) $user:$pass"
-                case None => s"${extractHost(repo.url)} $user:$pass"
+          }
+          // Pass credentials via temp file to avoid exposure in ps/proc (CWE-214)
+          val credFile = {
+            val creds = repos.flatMap { repo =>
+              for (user <- repo.user; pass <- repo.password) yield {
+                repo.realm match {
+                  case Some(r) => s"${extractHost(repo.url)}($r) $user:$pass"
+                  case None => s"${extractHost(repo.url)} $user:$pass"
+                }
               }
-              cmd.add("--credentials")
-              cmd.add(cred)
+            }
+            if (creds.nonEmpty) {
+              val tmpFile = Files.createTempFile("coursier-creds-", ".properties")
+              tmpFile.toFile.setReadable(false, false)
+              tmpFile.toFile.setReadable(true, true)
+              tmpFile.toFile.setWritable(false, false)
+              tmpFile.toFile.setWritable(true, true)
+              Files.writeString(tmpFile, creds.mkString("\n"))
+              cmd.add("--credential-file")
+              cmd.add(tmpFile.toAbsolutePath.toString)
+              Some(tmpFile)
+            } else {
+              None
             }
           }
-          debug(s"  coursier cmd: ${cmd}")
+          debug(s"  coursier cmd: coursier fetch --sources $coord (${repos.size} repos, credentials=${credFile.isDefined})")
           val pb = new ProcessBuilder(cmd)
           pb.redirectErrorStream(false)
-          val proc = pb.start()
           try {
-            // Read stderr in a separate thread to avoid blocking
-            val stderrThread = new Thread(new Runnable {
-              def run(): Unit = {
-                try { proc.getErrorStream.readAllBytes() } catch { case _: Exception => () }
+            val proc = pb.start()
+            try {
+              // Read stderr in a separate thread to avoid blocking
+              val stderrThread = new Thread(new Runnable {
+                def run(): Unit = {
+                  try { proc.getErrorStream.readAllBytes() } catch { case _: Exception => () }
+                }
+              })
+              stderrThread.setDaemon(true)
+              stderrThread.start()
+              val stdout = new String(proc.getInputStream.readAllBytes()).trim
+              val exitCode = proc.waitFor()
+              debug(s"  coursier exit=$exitCode, stdout lines=${stdout.split("\n").length}")
+              if (exitCode == 0) {
+                // Only accept lines that are absolute file paths ending with -sources.jar
+                val sourcePaths = stdout.split("\n")
+                  .map(_.trim)
+                  .filter(l => l.startsWith("/") && l.endsWith("-sources.jar"))
+                sourcePaths.headOption.map { sp =>
+                  val srcPath = Path.of(sp)
+                  debug(s"  fetched source jar: $srcPath")
+                  srcPath
+                }
+              } else {
+                debug(s"  coursier fetch failed (exit $exitCode): $stdout")
+                None
               }
-            })
-            stderrThread.setDaemon(true)
-            stderrThread.start()
-            val stdout = new String(proc.getInputStream.readAllBytes()).trim
-            val exitCode = proc.waitFor()
-            debug(s"  coursier exit=$exitCode, stdout lines=${stdout.split("\n").length}")
-            if (exitCode == 0) {
-              // Only accept lines that are absolute file paths ending with -sources.jar
-              val sourcePaths = stdout.split("\n")
-                .map(_.trim)
-                .filter(l => l.startsWith("/") && l.endsWith("-sources.jar"))
-              sourcePaths.headOption.map { sp =>
-                val srcPath = Path.of(sp)
-                debug(s"  fetched source jar: $srcPath")
-                srcPath
-              }
-            } else {
-              debug(s"  coursier fetch failed (exit $exitCode): $stdout")
-              None
+            } finally {
+              proc.destroy()
             }
           } catch {
             case e: Exception => {
-              proc.destroyForcibly()
               debug(s"  coursier process error: ${e.getMessage}")
               None
             }
+          } finally {
+            credFile.foreach(f => try { Files.deleteIfExists(f) } catch { case _: Exception => () })
           }
         }
       }

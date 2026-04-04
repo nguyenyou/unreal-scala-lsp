@@ -65,6 +65,6 @@ class JsonRpc(in: InputStream, out: OutputStream) {
     }) { () }
     val headers = sb.toString
     val m = "(?i)Content-Length:\\s*(\\d+)".r.findFirstMatchIn(headers)
-    m.map(_.group(1).toInt).getOrElse(throw new RuntimeException(s"Missing Content-Length in: $headers"))
+    m.map(_.group(1).toInt).getOrElse(throw new RuntimeException("Missing Content-Length in headers"))
   }
 }
