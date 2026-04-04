@@ -3,11 +3,18 @@ package build
 import mill._
 import mill.scalalib._
 
+object Versions {
+  val scala = "3.8.2"
+  val scalameta = "4.15.2"
+  val ujson = "4.4.3"
+  val javaparser = "3.28.0"
+}
+
 trait UnrealModule extends ScalaModule {
-  def scalaVersion = "3.8.2"
+  def scalaVersion = Versions.scala
 
   def mvnDeps = Seq(
-    mvn"com.lihaoyi::ujson:4.4.3",
+    mvn"com.lihaoyi::ujson:${Versions.ujson}",
   )
 }
 
@@ -19,8 +26,8 @@ object indexer extends UnrealModule {
   def moduleDeps = Seq(core)
 
   def mvnDeps = super.mvnDeps() ++ Seq(
-    mvn"org.scalameta::scalameta:4.15.2",
-    mvn"com.github.javaparser:javaparser-core:3.28.0",
+    mvn"org.scalameta::scalameta:${Versions.scalameta}",
+    mvn"com.github.javaparser:javaparser-core:${Versions.javaparser}",
   )
 }
 
@@ -28,9 +35,9 @@ object compiler extends UnrealModule {
   def moduleDeps = Seq(core, indexer)
 
   def mvnDeps = super.mvnDeps() ++ Seq(
-    mvn"org.scala-lang::scala3-presentation-compiler:3.8.2",
-    mvn"org.scalameta::scalameta:4.15.2",
-    mvn"org.scalameta:semanticdb-shared_2.13:4.15.2",
+    mvn"org.scala-lang::scala3-presentation-compiler:${Versions.scala}",
+    mvn"org.scalameta::scalameta:${Versions.scalameta}",
+    mvn"org.scalameta:semanticdb-shared_2.13:${Versions.scalameta}",
   )
 }
 
