@@ -42,6 +42,27 @@ code --install-extension unreal-scala-lsp-1.0.0.vsix
    ```
 4. Reload VS Code (Cmd+Shift+P -> "Developer: Reload Window")
 
+## Release
+
+### LSP Server
+
+1. Bump version in `server/src/unreallsp/server/Main.scala` and `vscode-extension/src/extension.ts` + `vscode-extension/package.json`
+2. Commit and push
+3. Tag and push to trigger the GitHub release:
+   ```bash
+   git tag v1.x.0
+   git push origin v1.x.0
+   ```
+
+### VS Code Extension
+
+```bash
+cd vscode-extension
+bun run compile
+bunx @vscode/vsce package
+bunx @vscode/vsce publish
+```
+
 ## Architecture
 
 ### Two-tier indexing
