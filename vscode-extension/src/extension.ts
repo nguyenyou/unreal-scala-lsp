@@ -9,7 +9,7 @@ import {
   ServerOptions,
 } from "vscode-languageclient/node";
 
-const VERSION = "1.5.0";
+const VERSION = "1.6.0";
 const REPO = "nguyenyou/unreal-scala-lsp";
 const JAR_NAME = "unreal-scala-lsp.jar";
 
