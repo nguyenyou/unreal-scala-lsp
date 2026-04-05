@@ -8,7 +8,7 @@ object Main {
     if (args.contains("--debug")) {
       setDebug(true)
     }
-    log("Starting server v1.5.0")
+    log("Starting server v1.6.0")
     val rpc = JsonRpc(System.in, System.out)
     val server = LspServer(rpc)
     server.loop()

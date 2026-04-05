@@ -53,7 +53,7 @@ object MillWorkspace {
     val children = dir.listFiles()
     if (children != null) {
       for (child <- children) {
-        if (child.isDirectory && !child.getName.endsWith(".dest")) {
+        if (child.isDirectory && !child.getName.endsWith(".dest") && child.getName != "mill-bsp-out") {
           collectModules(outDir, child, acc)
         }
       }
