@@ -6,6 +6,10 @@ A Scala/Java language server providing go-to-definition and find-references.
 
 Mill build tool. Run `./mill server.compile` to compile, `./mill server.assembly` for the fat jar.
 
+## Release Version Bump
+
+Three files to update: `server/src/unreallsp/server/Main.scala`, `vscode-extension/src/extension.ts`, `vscode-extension/package.json`.
+
 ## Architecture
 
 Two provider backends behind the `LanguageProvider` trait:
