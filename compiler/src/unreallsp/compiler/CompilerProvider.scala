@@ -1,6 +1,7 @@
 package unreallsp.compiler
 
 import unreallsp.core.{LanguageProvider, MillModule, MillRepo, MillWorkspace, SymbolLocation, log, debug}
+import java.io.File
 import java.net.URI
 import java.nio.file.{Files, Path}
 import scala.compiletime.uninitialized
@@ -12,21 +13,29 @@ import org.eclipse.lsp4j.Location
 class CompilerProvider extends LanguageProvider {
   private var allModules: List[MillModule] = Nil
   private var allRepos: List[MillRepo] = Nil
-  private var workspaceRoot: java.io.File = uninitialized
+  private var workspaceRoot: File = uninitialized
   private val compilers = mutable.Map.empty[String, ScalaPresentationCompiler]
   private val fileContents = mutable.Map.empty[String, String]
   private val openFiles = mutable.Set.empty[String]
 
-  def indexWorkspace(root: java.io.File): Unit = {
+  def indexWorkspace(root: File): Unit = {
     workspaceRoot = root
-    allModules = MillWorkspace.discover(root)
-    allRepos = MillWorkspace.discoverRepos(root)
-    log(s"compiler-precise: discovered ${allModules.size} Mill modules, ${allRepos.size} custom repos")
-    for (m <- allModules) {
-      log(s"  ${m.name}: ${m.classpath.size} classpath entries, scala ${m.scalaVersion}")
-    }
-    for (r <- allRepos) {
-      debug(s"  repo: ${r.url} (auth=${r.user.isDefined})")
+    try {
+      allModules = MillWorkspace.discover(root)
+      allRepos = MillWorkspace.discoverRepos(root)
+      log(s"compiler-precise: discovered ${allModules.size} Mill modules, ${allRepos.size} custom repos")
+      for (m <- allModules) {
+        log(s"  ${m.name}: ${m.classpath.size} classpath entries, scala ${m.scalaVersion}")
+      }
+      for (r <- allRepos) {
+        debug(s"  repo: ${r.url} (auth=${r.user.isDefined})")
+      }
+    } catch {
+      case e: Exception => {
+        allModules = Nil
+        allRepos = Nil
+        log(s"compiler-precise: Mill metadata discovery failed; precise definitions disabled for this workspace: ${e.getMessage}")
+      }
     }
   }
 
@@ -47,7 +56,7 @@ class CompilerProvider extends LanguageProvider {
     compilerForUri(uri).foreach(_.didClose(URI(uri)))
   }
 
-  def reindexFile(uri: String, file: java.io.File): Unit = () // PC compiles on demand
+  def reindexFile(uri: String, file: File): Unit = () // PC compiles on demand
 
   def removeFile(uri: String): Unit = {
     fileContents.remove(uri)

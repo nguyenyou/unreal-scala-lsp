@@ -1,7 +1,8 @@
 package unreallsp.core
 
 import java.io.File
-import java.nio.file.{Files, Path}
+import java.nio.file.{Files, LinkOption, Path}
+import scala.collection.mutable
 import scala.util.matching.Regex
 
 /** A Maven repository with optional credentials, extracted from mill-build/build.mill. */
@@ -23,16 +24,50 @@ case class MillModule(
 
 /** Reads Mill's `out/` cache to discover modules and their classpaths. */
 object MillWorkspace {
+  private val MaxVisitedOutDirs = 100_000
+  private val MaxDiscoveryMillis = 5_000L
+  private val SkipDirNames = Set("mill-bsp-out")
+
+  private final class TraversalState {
+    private val deadlineNanos = System.nanoTime() + MaxDiscoveryMillis * 1_000_000L
+    private var _visitedDirs = 0
+    private var _truncated = false
+
+    def visitedDirs: Int = _visitedDirs
+
+    def truncated: Boolean = _truncated
+
+    def tryVisit(): Boolean = {
+      if (_truncated) {
+        false
+      } else if (_visitedDirs >= MaxVisitedOutDirs || System.nanoTime() >= deadlineNanos) {
+        _truncated = true
+        false
+      } else {
+        _visitedDirs += 1
+        true
+      }
+    }
+  }
 
   /** Discover all Mill modules under a workspace root. */
   def discover(workspaceRoot: File): List[MillModule] = {
-    val outDir = File(workspaceRoot, "out")
-    if (!outDir.isDirectory) {
-      return Nil
+    resolveDiscoveryRoot(File(workspaceRoot, "out")) match {
+      case None => Nil
+      case Some(outDir) => {
+        val modules = List.newBuilder[MillModule]
+        val visited = mutable.Set.empty[Path]
+        val state = TraversalState()
+
+        collectModules(outDir, outDir, modules, visited, state)
+
+        val result = modules.result()
+        if (state.truncated) {
+          log(s"compiler-precise: stopped Mill out discovery after ${state.visitedDirs} directories; using ${result.size} discovered modules")
+        }
+        result
+      }
     }
-    val modules = List.newBuilder[MillModule]
-    collectModules(outDir, outDir, modules)
-    modules.result()
   }
 
   /** Find which module a file URI belongs to, based on source roots. */
@@ -42,22 +77,74 @@ object MillWorkspace {
     }
   }
 
-  private def collectModules(outDir: File, dir: File, acc: collection.mutable.Builder[MillModule, List[MillModule]]): Unit = {
-    val cpFile = File(dir, "compileClasspath.json")
-    if (cpFile.isFile) {
-      val name = moduleName(outDir, dir)
-      if (name != "mill-build") {
-        readModule(name, dir).foreach(acc += _)
-      }
-    }
-    val children = dir.listFiles()
-    if (children != null) {
-      for (child <- children) {
-        if (child.isDirectory && !child.getName.endsWith(".dest") && child.getName != "mill-bsp-out") {
-          collectModules(outDir, child, acc)
+  private def collectModules(
+    outDir: File,
+    dir: File,
+    acc: mutable.Builder[MillModule, List[MillModule]],
+    visited: mutable.Set[Path],
+    state: TraversalState,
+  ): Unit = {
+    if (state.tryVisit() && isPlainDirectory(dir)) {
+      directoryKey(dir) match {
+        case None => ()
+        case Some(key) if visited.contains(key) => ()
+        case Some(key) => {
+          visited += key
+
+          val cpFile = File(dir, "compileClasspath.json")
+          if (cpFile.isFile) {
+            val name = moduleName(outDir, dir)
+            if (name != "mill-build") {
+              readModule(name, dir).foreach(acc += _)
+            }
+          }
+
+          for (child <- listChildren(dir)) {
+            if (shouldDescend(child)) {
+              collectModules(outDir, child, acc, visited, state)
+            }
+          }
         }
       }
     }
+  }
+
+  private def shouldDescend(dir: File): Boolean = {
+    val name = dir.getName
+    isPlainDirectory(dir) && !name.endsWith(".dest") && !SkipDirNames.contains(name)
+  }
+
+  private def isPlainDirectory(file: File): Boolean = {
+    try {
+      Files.isDirectory(file.toPath, LinkOption.NOFOLLOW_LINKS)
+    } catch {
+      case _: Exception => false
+    }
+  }
+
+  private def resolveDiscoveryRoot(file: File): Option[File] = {
+    try {
+      val path = file.toPath
+      if (Files.isDirectory(path)) {
+        Some(path.toRealPath().toFile)
+      } else {
+        None
+      }
+    } catch {
+      case _: Exception => None
+    }
+  }
+
+  private def directoryKey(dir: File): Option[Path] = {
+    try {
+      Some(dir.toPath.toRealPath())
+    } catch {
+      case _: Exception => None
+    }
+  }
+
+  private def listChildren(dir: File): Array[File] = {
+    Option(dir.listFiles()).getOrElse(Array.empty[File])
   }
 
   private def moduleName(outDir: File, dir: File): String = {
