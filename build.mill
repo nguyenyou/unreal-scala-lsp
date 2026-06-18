@@ -4,10 +4,10 @@ import mill._
 import mill.scalalib._
 
 object Versions {
-  val scala = "3.8.2"
-  val scalameta = "4.15.2"
+  val scala = "3.8.4"
+  val scalameta = "4.17.0"
   val ujson = "4.4.3"
-  val javaparser = "3.28.0"
+  val javaparser = "3.28.2"
 }
 
 trait UnrealModule extends ScalaModule {
