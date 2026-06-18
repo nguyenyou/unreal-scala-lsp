@@ -44,24 +44,7 @@ code --install-extension unreal-scala-lsp-1.0.0.vsix
 
 ## Release
 
-### LSP Server
-
-1. Bump version in `server/src/unreallsp/server/Main.scala` and `vscode-extension/src/extension.ts` + `vscode-extension/package.json`
-2. Commit and push
-3. Tag and push to trigger the GitHub release:
-   ```bash
-   git tag v1.x.0
-   git push origin v1.x.0
-   ```
-
-### VS Code Extension
-
-```bash
-cd vscode-extension
-bun run compile
-bunx @vscode/vsce package
-bunx @vscode/vsce publish
-```
+See [RELEASE.md](RELEASE.md) for the full release process. In short, a pushed `v*` tag builds the server jar through GitHub Actions, and the VS Code extension is then packaged and published manually from a local checkout.
 
 ## Architecture
 
