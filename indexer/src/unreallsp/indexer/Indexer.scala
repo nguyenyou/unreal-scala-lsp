@@ -87,7 +87,7 @@ class Indexer {
         try {
           implicit val dialect: Dialect = dialects.Scala3
           val input = Input.VirtualFile(uri, text)
-          val tokens = input.tokenize.get.tokens
+          val tokens = input.tokenize.get
           var depth = 0
           var i = 0
 

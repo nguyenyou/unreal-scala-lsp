@@ -80,8 +80,8 @@ Based on the [LSP 3.17 Specification](https://microsoft.github.io/language-serve
 
 ## Tech stack
 
-- **Scala 3.8.2** / **Mill 1.1.5**
-- [Scalameta](https://scalameta.org/) 4.15.2 — Scala tokenizer and parser
+- **Scala 3.8.4** / **Mill 1.1.5**
+- [Scalameta](https://scalameta.org/) 4.17.0 — Scala tokenizer and parser
 - [ujson](https://com-lihaoyi.github.io/upickle/) — JSON parsing (zero reflection)
 - [vscode-languageclient](https://www.npmjs.com/package/vscode-languageclient) 9.0.1 — VS Code LSP client
 - GraalVM native image support (optional)
