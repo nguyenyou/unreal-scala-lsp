@@ -2,6 +2,7 @@ package unreallsp.compiler
 
 import unreallsp.core.{LanguageProvider, SymbolLocation, log, debug}
 import unreallsp.indexer.AstProvider
+import java.io.File
 
 /** Hybrid provider: PC for definition (exact), AST for references (project-wide).
   * Falls back to AST for definition when PC returns no results.
@@ -10,8 +11,9 @@ class HybridProvider extends LanguageProvider {
   private val ast = AstProvider()
   private val pc = CompilerProvider()
 
-  def indexWorkspace(root: java.io.File): Unit = {
+  def indexWorkspace(root: File): Unit = {
     ast.indexWorkspace(root)
+    log(s"AST index ready: ${ast.uniqueSymbolNames} unique symbol names, collected across ${ast.indexedFiles} files")
     pc.indexWorkspace(root)
   }
 
@@ -30,7 +32,7 @@ class HybridProvider extends LanguageProvider {
     pc.didClose(uri)
   }
 
-  def reindexFile(uri: String, file: java.io.File): Unit = {
+  def reindexFile(uri: String, file: File): Unit = {
     ast.reindexFile(uri, file)
     pc.reindexFile(uri, file)
   }
